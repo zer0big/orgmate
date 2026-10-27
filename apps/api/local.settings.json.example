@@ -1,0 +1,15 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "FUNCTIONS_WORKER_RUNTIME": "node",
+    "AzureWebJobsFeatureFlags": "EnableWorkerIndexing",
+    "AzureWebJobsStorage": "UseDevelopmentStorage=true",
+    "ORGMATE_DATA_STORAGE_ACCOUNT": "",
+    "ORGMATE_DATA_BLOB_ENDPOINT": "",
+    "ORGMATE_COSMOS_ENDPOINT": "",
+    "ORGMATE_COSMOS_DATABASE": "orgmate",
+    "ORGMATE_SPEECH_ENDPOINT": "",
+    "ORGMATE_OPENAI_ENDPOINT": "",
+    "ORGMATE_CHAT_DEPLOYMENT": "gpt-4.1-mini"
+  }
+}

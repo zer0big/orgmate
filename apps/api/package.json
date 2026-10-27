@@ -1,0 +1,25 @@
+{
+  "name": "@orgmate/api",
+  "version": "0.1.0",
+  "private": true,
+  "main": "dist/src/index.js",
+  "scripts": {
+    "clean": "rimraf dist",
+    "prebuild": "npm run clean",
+    "build": "tsc",
+    "watch": "tsc --watch",
+    "start": "func start",
+    "test": "node --test --experimental-strip-types \"src/**/*.test.ts\""
+  },
+  "dependencies": {
+    "@azure/functions": "^4.7.0",
+    "@azure/identity": "^4.6.0",
+    "@azure/storage-blob": "^12.26.0",
+    "@azure/cosmos": "^4.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "rimraf": "^6.0.1",
+    "typescript": "^5.7.0"
+  }
+}

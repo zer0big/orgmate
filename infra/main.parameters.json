@@ -1,0 +1,27 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "environmentName": {
+      "value": "${AZURE_ENV_NAME}"
+    },
+    "location": {
+      "value": "${AZURE_LOCATION=koreacentral}"
+    },
+    "openAiLocation": {
+      "value": "${AZURE_OPENAI_LOCATION=eastus}"
+    },
+    "chatModelName": {
+      "value": "${ORGMATE_CHAT_MODEL=gpt-4.1-mini}"
+    },
+    "chatModelVersion": {
+      "value": "${ORGMATE_CHAT_MODEL_VERSION=2025-04-14}"
+    },
+    "chatModelCapacity": {
+      "value": "${ORGMATE_CHAT_MODEL_CAPACITY=50}"
+    },
+    "developerPrincipalId": {
+      "value": "${AZURE_PRINCIPAL_ID}"
+    }
+  }
+}

@@ -1,0 +1,46 @@
+# Node
+node_modules/
+npm-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# Build output
+dist/
+build/
+*.tsbuildinfo
+
+# Azure Functions
+apps/api/local.settings.json
+apps/api/bin/
+apps/api/obj/
+.func/
+
+# Azure Developer CLI
+.azure/
+
+# Expo / React Native
+apps/mobile/.expo/
+apps/mobile/android/
+apps/mobile/ios/
+apps/mobile/*.apk
+apps/mobile/*.aab
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+*.env
+!*.env.example
+
+# Editor
+.vscode/*.local
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs and temp
+*.log
+tmp/
+temp/
