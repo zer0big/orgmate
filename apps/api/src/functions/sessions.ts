@@ -43,7 +43,14 @@ async function createSession(
     return unauthorized();
   }
 
-  const body = (await request.json().catch(() => ({}))) as { title?: string };
+  const body = (await request.json().catch(() => ({}))) as {
+    title?: string;
+    expectedSpeakers?: number;
+  };
+  const expectedSpeakers =
+    typeof body.expectedSpeakers === 'number' && body.expectedSpeakers >= 1
+      ? Math.min(20, Math.round(body.expectedSpeakers))
+      : undefined;
   const now = new Date().toISOString();
   const session: SessionDocument = {
     id: randomUUID(),
@@ -53,6 +60,7 @@ async function createSession(
     createdAt: now,
     updatedAt: now,
     chunks: [],
+    expectedSpeakers,
   };
 
   await sessionsContainer.items.create(session);

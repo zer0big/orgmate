@@ -7,6 +7,7 @@ import {
 } from '../services/cosmos.js';
 import { downloadJson, uploadJson, uploadText } from '../services/storage.js';
 import { summarizeTranscript } from '../services/openai.js';
+import { readGlossary, toPhraseList } from '../services/glossary.js';
 import { findTemplate, renderMarkdown } from '../templates/systemTemplates.js';
 
 const TRANSCRIPT_CONTAINER = 'transcripts';
@@ -109,7 +110,11 @@ async function summarizeSession(message: unknown, context: InvocationContext): P
       title: session.title,
       recordedAt: session.createdAt.slice(0, 16).replace('T', ' '),
     };
-    const result = await summarizeTranscript(template, toDialogue(transcript), meta);
+    const glossary = toPhraseList(await readGlossary(session.userId));
+    const result = await summarizeTranscript(template, toDialogue(transcript), {
+      ...meta,
+      glossary,
+    });
     const markdown = renderMarkdown(template, result.data, {
       ...meta,
       durationSeconds: session.durationSeconds,

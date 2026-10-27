@@ -9,5 +9,6 @@ app.setup({
 import './functions/health.js';
 import './functions/sessions.js';
 import './functions/templates.js';
+import './functions/glossary.js';
 import './functions/transcribe.js';
 import './functions/summarize.js';

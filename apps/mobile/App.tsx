@@ -35,6 +35,7 @@ import {
   type Template,
 } from './src/api/client';
 import { SummaryView } from './src/components/SummaryView';
+import { GlossaryScreen } from './src/components/GlossaryScreen';
 import { toPlainText } from './src/export/summaryText';
 import { ThemeProvider, useTheme } from './src/theme/useTheme';
 import { THEMES, type Theme } from './src/theme/theme';
@@ -47,6 +48,10 @@ const STATUS_BAR_INSET = Platform.OS === 'android' ? (StatusBar.currentHeight ??
 /** How long to wait for a background worker before giving up. */
 const POLL_INTERVAL_MS = 4000;
 const POLL_ATTEMPTS = 150;
+
+/** Telling the service the real headcount stops diarization from inventing speakers. */
+const SPEAKER_CHOICES = [1, 2, 3, 4, 5, 6];
+const MAX_SPEAKER_CHOICE = SPEAKER_CHOICES[SPEAKER_CHOICES.length - 1];
 
 const STATUS_LABELS: Record<string, string> = {
   recording: '녹음 중',
@@ -143,6 +148,7 @@ function SettingsSheet({
   styles,
   showDetails,
   onToggleDetails,
+  onOpenGlossary,
   onSignOut,
 }: {
   visible: boolean;
@@ -150,6 +156,7 @@ function SettingsSheet({
   styles: AppStyles;
   showDetails: boolean;
   onToggleDetails: () => void;
+  onOpenGlossary: () => void;
   onSignOut: () => void;
 }) {
   const { theme, setThemeId } = useTheme();
@@ -184,6 +191,16 @@ function SettingsSheet({
 
           <View style={styles.sheetDivider} />
 
+          <Pressable
+            onPress={() => {
+              onClose();
+              onOpenGlossary();
+            }}
+            style={styles.sheetRow}
+          >
+            <Text style={styles.sheetRowLabel}>용어 사전</Text>
+            <Text style={styles.sheetRowValue}>관리</Text>
+          </Pressable>
           <Pressable onPress={onToggleDetails} style={styles.sheetRow}>
             <Text style={styles.sheetRowLabel}>상세 정보 표시</Text>
             <Text style={styles.sheetRowValue}>{showDetails ? '켜짐' : '꺼짐'}</Text>
@@ -357,6 +374,8 @@ function RecorderScreen({ onSignOut }: { onSignOut: () => void }) {
   const [organizingId, setOrganizingId] = useState<string | undefined>();
   const [showArchived, setShowArchived] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [showGlossary, setShowGlossary] = useState(false);
+  const [expectedSpeakers, setExpectedSpeakers] = useState(2);
   const [showDetails, setShowDetails] = useState(false);
   const [log, setLog] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
@@ -582,7 +601,7 @@ function RecorderScreen({ onSignOut }: { onSignOut: () => void }) {
     setError(undefined);
     try {
       uploadsRef.current = [];
-      const created = await createSession();
+      const created = await createSession(undefined, expectedSpeakers);
       sessionRef.current = created;
       setSession(created);
       append(`세션 생성 ${created.id.slice(0, 8)}`);
@@ -593,7 +612,7 @@ function RecorderScreen({ onSignOut }: { onSignOut: () => void }) {
     } finally {
       setBusy(false);
     }
-  }, [append, recorder]);
+  }, [append, recorder, expectedSpeakers]);
 
   const onStop = useCallback(async () => {
     setBusy(true);
@@ -673,6 +692,30 @@ function RecorderScreen({ onSignOut }: { onSignOut: () => void }) {
 
         {recorder.error ? <Text style={styles.error}>{recorder.error}</Text> : null}
         {error ? <Text style={styles.error}>{error}</Text> : null}
+
+        {recorder.isRecording ? null : (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>참석자 수</Text>
+            <View style={styles.chipRow}>
+              {SPEAKER_CHOICES.map((count) => (
+                <Pressable
+                  key={count}
+                  onPress={() => setExpectedSpeakers(count)}
+                  style={[styles.chip, expectedSpeakers === count && styles.chipActive]}
+                >
+                  <Text
+                    style={[
+                      styles.chipLabel,
+                      expectedSpeakers === count && styles.chipLabelActive,
+                    ]}
+                  >
+                    {count === MAX_SPEAKER_CHOICE ? `${count}명 이상` : `${count}명`}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+          </View>
+        )}
 
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>정리 템플릿</Text>
@@ -757,8 +800,11 @@ function RecorderScreen({ onSignOut }: { onSignOut: () => void }) {
         styles={styles}
         showDetails={showDetails}
         onToggleDetails={() => setShowDetails((previous) => !previous)}
+        onOpenGlossary={() => setShowGlossary(true)}
         onSignOut={onSignOut}
       />
+
+      <GlossaryScreen visible={showGlossary} onClose={() => setShowGlossary(false)} />
     </>
   );
 }

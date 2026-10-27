@@ -24,6 +24,7 @@ export interface Session {
   updatedAt: string;
   chunks: SessionChunk[];
   durationSeconds?: number;
+  expectedSpeakers?: number;
   transcriptPreview?: string;
   speakerCount?: number;
   transcribedAt?: string;
@@ -33,6 +34,13 @@ export interface Session {
 }
 
 export type TemplateFieldType = 'text' | 'list' | 'table';
+export interface GlossaryTerm {
+  /** The correct spelling that should appear in transcripts. */
+  text: string;
+  /** Known mis-recognitions rewritten to `text` after transcription. */
+  aliases: string[];
+  note?: string;
+}
 
 export interface TemplateColumn {
   key: string;
@@ -113,8 +121,24 @@ async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
   return (await response.json()) as T;
 }
 
-export function createSession(title?: string): Promise<Session> {
-  return call<Session>('/sessions', { method: 'POST', body: JSON.stringify({ title }) });
+export function createSession(title?: string, expectedSpeakers?: number): Promise<Session> {
+  return call<Session>('/sessions', {
+    method: 'POST',
+    body: JSON.stringify({ title, expectedSpeakers }),
+  });
+}
+
+export function listTerms(): Promise<{ terms: GlossaryTerm[]; maxTerms: number }> {
+  return call<{ terms: GlossaryTerm[]; maxTerms: number }>('/terms');
+}
+
+export function replaceTerms(
+  terms: GlossaryTerm[],
+): Promise<{ terms: GlossaryTerm[]; maxTerms: number }> {
+  return call<{ terms: GlossaryTerm[]; maxTerms: number }>('/terms', {
+    method: 'PUT',
+    body: JSON.stringify({ terms }),
+  });
 }
 
 export function listSessions(includeArchived = false): Promise<{ sessions: Session[] }> {

@@ -44,6 +44,8 @@ export interface SessionDocument {
   updatedAt: string;
   chunks: SessionChunk[];
   durationSeconds?: number;
+  /** Headcount the user declared before recording; used as a diarization hint. */
+  expectedSpeakers?: number;
   transcriptBlobPath?: string;
   /** First few hundred characters of the transcript, for list previews. */
   transcriptPreview?: string;

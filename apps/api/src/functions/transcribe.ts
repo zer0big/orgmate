@@ -7,6 +7,8 @@ import {
 } from '../services/cosmos.js';
 import { downloadBlob, uploadJson } from '../services/storage.js';
 import { transcribeAudio } from '../services/speech.js';
+import { applyGlossary, readGlossary, toPhraseList } from '../services/glossary.js';
+import { distinctSpeakers, normalizeSpeakers } from '../services/diarization.js';
 
 const AUDIO_CONTAINER = 'audio';
 const TRANSCRIPT_CONTAINER = 'transcripts';
@@ -62,40 +64,60 @@ async function saveSession(session: SessionDocument): Promise<void> {
  * Transcribes every chunk of a session and stores one merged transcript.
  * Chunk offsets are rebased onto the session timeline so the summarize step
  * sees a single continuous conversation.
+ *
+ * The user's glossary biases recognition up front and rewrites any remaining
+ * mis-recognitions afterwards, because the phrase list is a hint, not a rule.
  */
 async function buildTranscript(
   session: SessionDocument,
   context: InvocationContext,
 ): Promise<TranscriptDocument> {
   const segments: TranscriptSegment[] = [];
-  const speakers = new Set<number>();
   let timelineOffset = 0;
+  let peakChunkSpeakers = 0;
+
+  const terms = await readGlossary(session.userId);
+  const phrases = toPhraseList(terms);
+  if (phrases.length > 0) {
+    context.log(`Applying ${phrases.length} glossary term(s) to session ${session.id}`);
+  }
 
   const ordered = [...session.chunks].sort((a, b) => a.index - b.index);
   for (const chunk of ordered) {
     const audio = await downloadBlob(AUDIO_CONTAINER, chunk.blobPath);
     context.log(`Transcribing ${chunk.blobPath} (${audio.byteLength} bytes)`);
 
-    const result = await transcribeAudio(audio, `chunk-${chunk.index}.m4a`);
+    const result = await transcribeAudio(audio, `chunk-${chunk.index}.m4a`, {
+      maxSpeakers: session.expectedSpeakers,
+      phrases,
+    });
+
+    peakChunkSpeakers = Math.max(peakChunkSpeakers, distinctSpeakers(result.phrases ?? []));
 
     for (const phrase of result.phrases ?? []) {
       if (!phrase.text?.trim()) {
         continue;
-      }
-      if (phrase.speaker !== undefined) {
-        speakers.add(phrase.speaker);
       }
       segments.push({
         chunkIndex: chunk.index,
         speaker: phrase.speaker,
         offsetMilliseconds: timelineOffset + phrase.offsetMilliseconds,
         durationMilliseconds: phrase.durationMilliseconds,
-        text: phrase.text.trim(),
+        text: applyGlossary(phrase.text.trim(), terms),
       });
     }
 
     timelineOffset += result.durationMilliseconds ?? 0;
   }
+
+  const normalized = normalizeSpeakers(segments, session.expectedSpeakers);
+
+  // Speaker ids restart on every chunk, so the union across chunks overcounts.
+  // The busiest single chunk is the better lower bound.
+  const speakerCount = Math.max(
+    1,
+    Math.min(normalized.speakerCount, session.expectedSpeakers ?? (peakChunkSpeakers || 1)),
+  );
 
   return {
     sessionId: session.id,
@@ -103,9 +125,9 @@ async function buildTranscript(
     locale: config.transcriptionLocale,
     createdAt: new Date().toISOString(),
     durationMilliseconds: timelineOffset,
-    speakerCount: speakers.size,
-    text: segments.map((segment) => segment.text).join(' '),
-    segments,
+    speakerCount,
+    text: normalized.segments.map((segment) => segment.text).join(' '),
+    segments: normalized.segments,
   };
 }
 

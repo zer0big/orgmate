@@ -38,16 +38,28 @@ function buildSystemPrompt(template: SummaryTemplate): string {
   ].join('\n');
 }
 
-function buildUserPrompt(transcript: string, meta: { title: string; recordedAt: string }): string {
+function buildUserPrompt(
+  transcript: string,
+  meta: { title: string; recordedAt: string; glossary?: string[] },
+): string {
   const trimmed =
     transcript.length > MAX_TRANSCRIPT_CHARS
       ? `${transcript.slice(0, MAX_TRANSCRIPT_CHARS)}\n\n(이후 내용은 길이 제한으로 생략됨)`
       : transcript;
 
+  const glossary = meta.glossary?.length
+    ? [
+        '조직 전용 용어 (전사본에 비슷한 말이 나오면 아래 표기로 고쳐 쓴다):',
+        meta.glossary.map((term) => `- ${term}`).join('\n'),
+        '',
+      ]
+    : [];
+
   return [
     `녹음 제목: ${meta.title}`,
     `녹음 일시: ${meta.recordedAt}`,
     '',
+    ...glossary,
     '전사본:',
     '"""',
     trimmed,
@@ -68,7 +80,7 @@ export interface SummarizeResult {
 export async function summarizeTranscript(
   template: SummaryTemplate,
   transcript: string,
-  meta: { title: string; recordedAt: string },
+  meta: { title: string; recordedAt: string; glossary?: string[] },
 ): Promise<SummarizeResult> {
   const response = await client.chat.completions.create({
     model: config.chatDeployment,
