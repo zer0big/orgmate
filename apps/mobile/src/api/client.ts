@@ -31,11 +31,25 @@ export interface Session {
   error?: string;
 }
 
+export type TemplateFieldType = 'text' | 'list' | 'table';
+
+export interface TemplateColumn {
+  key: string;
+  label: string;
+}
+
+export interface TemplateField {
+  key: string;
+  label: string;
+  type: TemplateFieldType;
+  columns?: TemplateColumn[];
+}
+
 export interface Template {
   id: string;
   name: string;
   description: string;
-  fields: { key: string; label: string; type: string }[];
+  fields: TemplateField[];
 }
 
 export interface SummaryArtifact {
@@ -43,6 +57,7 @@ export interface SummaryArtifact {
   templateId: string;
   templateName: string;
   createdAt: string;
+  fields: TemplateField[];
   data: Record<string, unknown>;
   markdown: string;
 }

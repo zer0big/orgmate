@@ -23,8 +23,10 @@ import {
   requestSummary,
   uploadChunk,
   type Session,
+  type SummaryArtifact,
   type Template,
 } from './src/api/client';
+import { SummaryView } from './src/components/SummaryView';
 
 /** How long to wait for a background worker before giving up. */
 const POLL_INTERVAL_MS = 4000;
@@ -83,8 +85,9 @@ function RecorderScreen({
   const [sessions, setSessions] = useState<Session[]>([]);
   const [templates, setTemplates] = useState<Template[]>([]);
   const [templateId, setTemplateId] = useState<string>('meeting-minutes');
-  const [summaries, setSummaries] = useState<Record<string, string>>({});
+  const [summaries, setSummaries] = useState<Record<string, SummaryArtifact>>({});
   const [openSummary, setOpenSummary] = useState<Record<string, boolean>>({});
+  const [organizingId, setOrganizingId] = useState<string | undefined>();
   const [log, setLog] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | undefined>();
@@ -162,8 +165,9 @@ function RecorderScreen({
   const onOrganize = useCallback(
     async (target: Session) => {
       setError(undefined);
+      setOrganizingId(target.id);
       const template = templates.find((item) => item.id === templateId);
-      append(`정리 요청: ${template?.name ?? templateId}`);
+      append(`정리 요청: ${target.title} · ${template?.name ?? templateId}`);
 
       try {
         const queued = await requestSummary(target.id, templateId);
@@ -177,10 +181,12 @@ function RecorderScreen({
         }
 
         const artifact = await getSummary(target.id, templateId);
-        setSummaries((previous) => ({ ...previous, [target.id]: artifact.markdown }));
+        setSummaries((previous) => ({ ...previous, [target.id]: artifact }));
         setOpenSummary((previous) => ({ ...previous, [target.id]: true }));
       } catch (cause) {
         setError(String(cause));
+      } finally {
+        setOrganizingId(undefined);
       }
     },
     [append, templateId, templates, waitForStatus],
@@ -200,7 +206,7 @@ function RecorderScreen({
       }
       try {
         const artifact = await getSummary(target.id, saved.templateId);
-        setSummaries((previous) => ({ ...previous, [target.id]: artifact.markdown }));
+        setSummaries((previous) => ({ ...previous, [target.id]: artifact }));
       } catch (cause) {
         setError(String(cause));
       }
@@ -335,6 +341,9 @@ function RecorderScreen({
       <Text style={styles.meta}>
         {templates.find((item) => item.id === templateId)?.description ?? ''}
       </Text>
+      <Text style={styles.hint}>
+        선택한 템플릿은 아래에서 "정리"를 누른 세션 하나에만 적용된다. 세션은 각각 따로 정리된다.
+      </Text>
 
       <Text style={styles.sectionTitle}>내 세션</Text>
       {sessions.length === 0 ? (
@@ -342,10 +351,12 @@ function RecorderScreen({
       ) : (
         sessions.map((item) => {
           const working = BUSY_STATUSES.has(item.status);
+          const isOrganizing = organizingId === item.id;
           const canOrganize = item.status === 'transcribed' || item.status === 'organized';
+          const artifact = summaries[item.id];
           const hasSummary = (item.summaries?.length ?? 0) > 0;
           return (
-            <View key={item.id} style={styles.row}>
+            <View key={item.id} style={[styles.row, isOrganizing && styles.rowActive]}>
               <Text style={styles.rowTitle}>{item.title}</Text>
               <View style={styles.statusRow}>
                 {working ? <ActivityIndicator size="small" color="#1570EF" /> : null}
@@ -355,6 +366,11 @@ function RecorderScreen({
                   {item.speakerCount ? ` · 화자 ${item.speakerCount}명` : ''}
                 </Text>
               </View>
+              {item.summaries?.length ? (
+                <Text style={styles.meta}>
+                  정리본 {item.summaries.map((entry) => entry.templateName).join(', ')}
+                </Text>
+              ) : null}
               {item.transcriptPreview ? (
                 <Text style={styles.preview} numberOfLines={3}>
                   {item.transcriptPreview}
@@ -365,10 +381,21 @@ function RecorderScreen({
               {canOrganize ? (
                 <View style={styles.actionRow}>
                   <Pressable
+                    disabled={organizingId !== undefined}
                     onPress={() => void onOrganize(item)}
-                    style={[styles.smallButton, styles.buttonStart]}
+                    style={[
+                      styles.smallButton,
+                      styles.buttonStart,
+                      organizingId !== undefined && styles.buttonPressed,
+                    ]}
                   >
-                    <Text style={styles.smallButtonLabel}>정리</Text>
+                    <Text style={styles.smallButtonLabel}>
+                      {isOrganizing
+                        ? '정리 중...'
+                        : `이 세션 정리 · ${
+                            templates.find((entry) => entry.id === templateId)?.name ?? templateId
+                          }`}
+                    </Text>
                   </Pressable>
                   {hasSummary ? (
                     <Pressable
@@ -383,9 +410,7 @@ function RecorderScreen({
                 </View>
               ) : null}
 
-              {openSummary[item.id] && summaries[item.id] ? (
-                <Text style={styles.summary}>{summaries[item.id]}</Text>
-              ) : null}
+              {openSummary[item.id] && artifact ? <SummaryView artifact={artifact} /> : null}
             </View>
           );
         })
@@ -460,6 +485,8 @@ const styles = StyleSheet.create({
     borderColor: '#E4E7EC',
   },
   rowTitle: { fontWeight: '600', color: '#101828' },
+  rowActive: { borderColor: '#1570EF', borderWidth: 2 },
+  hint: { fontSize: 12, color: '#667085', lineHeight: 17 },
   preview: { fontSize: 12, color: '#344054', lineHeight: 17 },
   statusRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
@@ -479,14 +506,5 @@ const styles = StyleSheet.create({
   smallButtonLabel: { color: '#FFFFFF', fontSize: 13, fontWeight: '600' },
   smallButtonGhost: { backgroundColor: '#EFF4FF' },
   smallButtonGhostLabel: { color: '#1570EF', fontSize: 13, fontWeight: '600' },
-  summary: {
-    fontSize: 12,
-    color: '#101828',
-    lineHeight: 18,
-    backgroundColor: '#F9FAFB',
-    borderRadius: 8,
-    padding: 12,
-    marginTop: 4,
-  },
   logLine: { fontSize: 11, color: '#667085' },
 });
