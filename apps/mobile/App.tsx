@@ -33,6 +33,7 @@ import {
   type Template,
 } from './src/api/client';
 import { SummaryView } from './src/components/SummaryView';
+import { toPlainText } from './src/export/summaryText';
 
 const LOGO = require('./assets/logo.png');
 
@@ -83,8 +84,10 @@ function SignInScreen({ onSignIn, error }: { onSignIn: () => void; error?: strin
   return (
     <View style={styles.centered}>
       <Image source={LOGO} style={styles.logoLarge} resizeMode="contain" />
-      <Text style={styles.title}>OrgMate</Text>
-      <Text style={styles.subtitle}>회의를 녹음하고 템플릿에 맞춰 자동으로 정리한다.</Text>
+      <View style={styles.brandStack}>
+        <Text style={styles.title}>OrgMate</Text>
+        <Text style={styles.subtitle}>회의를 녹음하고 템플릿에 맞춰 자동으로 정리한다.</Text>
+      </View>
       <Pressable style={[styles.button, styles.buttonStart]} onPress={onSignIn}>
         <Text style={styles.buttonLabel}>조직 계정으로 로그인</Text>
       </Pressable>
@@ -93,13 +96,7 @@ function SignInScreen({ onSignIn, error }: { onSignIn: () => void; error?: strin
   );
 }
 
-function RecorderScreen({
-  displayName,
-  onSignOut,
-}: {
-  displayName?: string;
-  onSignOut: () => void;
-}) {
+function RecorderScreen({ onSignOut }: { onSignOut: () => void }) {
   const [session, setSession] = useState<Session | undefined>();
   const [sessions, setSessions] = useState<Session[]>([]);
   const [templates, setTemplates] = useState<Template[]>([]);
@@ -307,7 +304,7 @@ function RecorderScreen({
         }
         await Share.share({
           title: `${target.title} · ${artifact.templateName}`,
-          message: artifact.markdown,
+          message: toPlainText(artifact, target.title),
         });
       } catch (cause) {
         setError(String(cause));
@@ -381,10 +378,8 @@ function RecorderScreen({
       <View style={styles.headerRow}>
         <View style={styles.brandRow}>
           <Image source={LOGO} style={styles.logo} resizeMode="contain" />
-          <View>
-            <Text style={styles.title}>OrgMate</Text>
-            {displayName ? <Text style={styles.brandMeta}>{displayName}</Text> : null}
-          </View>
+          <View style={styles.brandDivider} />
+          <Text style={styles.title}>OrgMate</Text>
         </View>
         <Pressable onPress={onSignOut}>
           <Text style={styles.link}>로그아웃</Text>
@@ -585,7 +580,7 @@ export default function App() {
           <ActivityIndicator />
         </View>
       ) : auth.isSignedIn ? (
-        <RecorderScreen displayName={auth.displayName} onSignOut={auth.signOut} />
+        <RecorderScreen onSignOut={auth.signOut} />
       ) : (
         <SignInScreen onSignIn={auth.signIn} error={auth.error} />
       )}
@@ -599,9 +594,10 @@ const styles = StyleSheet.create({
   container: { padding: 24, gap: 14 },
   headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   brandRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  logo: { width: 46, height: 28 },
-  logoLarge: { width: 160, height: 76 },
-  brandMeta: { fontSize: 12, color: '#667085' },
+  brandStack: { alignItems: 'center', gap: 8 },
+  brandDivider: { width: 1, height: 22, backgroundColor: '#D0D5DD' },
+  logo: { width: 58, height: 28 },
+  logoLarge: { width: 220, height: 106 },
   sectionHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
