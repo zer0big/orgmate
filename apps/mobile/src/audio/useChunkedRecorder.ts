@@ -16,6 +16,9 @@ export interface RecordedChunk {
 export interface ChunkedRecorder {
   isRecording: boolean;
   elapsedSeconds: number;
+  nativeDurationSeconds: number;
+  nativeIsRecording: boolean;
+  fileSize: number;
   metering: number | undefined;
   chunks: RecordedChunk[];
   error: string | undefined;
@@ -46,7 +49,10 @@ export function useChunkedRecorder(onChunk?: (chunk: RecordedChunk) => void): Ch
   const sessionIdRef = useRef<string>('');
   const chunkIndexRef = useRef(0);
   const rotatingRef = useRef(false);
+  const recordingRef = useRef(false);
   const tickRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
+  const startedAtRef = useRef(0);
+  const chunkStartedAtRef = useRef(0);
   const chunksRef = useRef<RecordedChunk[]>([]);
   const onChunkRef = useRef(onChunk);
   onChunkRef.current = onChunk;
@@ -72,8 +78,27 @@ export function useChunkedRecorder(onChunk?: (chunk: RecordedChunk) => void): Ch
     }
   }, []);
 
+  /**
+   * Binding to the Android recording foreground service is asynchronous, so the
+   * first `record()` right after `prepareToRecordAsync()` can be rejected with
+   * "the service connection is not bound". Retry briefly before giving up.
+   */
+  const startNative = useCallback(async () => {
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        recorder.record();
+        return;
+      } catch (cause) {
+        if (attempt >= 10) {
+          throw cause;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 150));
+      }
+    }
+  }, [recorder]);
+
   const rotate = useCallback(async () => {
-    if (rotatingRef.current) {
+    if (rotatingRef.current || !recordingRef.current) {
       return;
     }
     rotatingRef.current = true;
@@ -85,13 +110,15 @@ export function useChunkedRecorder(onChunk?: (chunk: RecordedChunk) => void): Ch
         ...SPEECH_RECORDING_OPTIONS,
         fileName: chunkFileName(sessionIdRef.current, chunkIndexRef.current),
       });
-      recorder.record();
+      await startNative();
+      chunkStartedAtRef.current = Date.now();
     } catch (cause) {
+      chunkStartedAtRef.current = Date.now();
       setError(`청크 전환 실패: ${String(cause)}`);
     } finally {
       rotatingRef.current = false;
     }
-  }, [pushChunk, recorder]);
+  }, [pushChunk, recorder, startNative]);
 
   const start = useCallback(
     async (sessionId: string) => {
@@ -121,25 +148,30 @@ export function useChunkedRecorder(onChunk?: (chunk: RecordedChunk) => void): Ch
         ...SPEECH_RECORDING_OPTIONS,
         fileName: chunkFileName(sessionId, 0),
       });
-      recorder.record();
+      await startNative();
+      startedAtRef.current = Date.now();
+      chunkStartedAtRef.current = startedAtRef.current;
+      recordingRef.current = true;
       setIsRecording(true);
 
       clearTick();
+      // Wall-clock based so a throttled or suspended JS thread does not lose time.
       tickRef.current = setInterval(() => {
-        setElapsedSeconds((previous) => {
-          const next = previous + 1;
-          if (next > 0 && next % CHUNK_SECONDS === 0) {
-            void rotate();
-          }
-          return next;
-        });
+        if (!recordingRef.current) {
+          return;
+        }
+        setElapsedSeconds(Math.floor((Date.now() - startedAtRef.current) / 1000));
+        if (Date.now() - chunkStartedAtRef.current >= CHUNK_SECONDS * 1000) {
+          void rotate();
+        }
       }, 1000);
     },
-    [clearTick, recorder, rotate],
+    [clearTick, recorder, rotate, startNative],
   );
 
   const stop = useCallback(async () => {
     clearTick();
+    recordingRef.current = false;
     try {
       await recorder.stop();
       pushChunk(recorder.uri);
@@ -164,6 +196,9 @@ export function useChunkedRecorder(onChunk?: (chunk: RecordedChunk) => void): Ch
   return {
     isRecording,
     elapsedSeconds,
+    nativeDurationSeconds: Math.floor(recorderState.durationMillis / 1000),
+    nativeIsRecording: recorderState.isRecording,
+    fileSize: recorderState.fileSize,
     metering: recorderState.metering,
     chunks,
     error,

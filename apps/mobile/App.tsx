@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  AppState,
   Pressable,
   SafeAreaView,
   ScrollView,
@@ -92,6 +93,13 @@ function RecorderScreen({
     void refresh();
   }, [refresh]);
 
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (state) => {
+      append(`앱 상태 ${state}`);
+    });
+    return () => subscription.remove();
+  }, [append]);
+
   const onStart = useCallback(async () => {
     setBusy(true);
     setError(undefined);
@@ -150,6 +158,11 @@ function RecorderScreen({
         </Text>
         <Text style={styles.meta}>
           입력 레벨 {recorder.metering === undefined ? '-' : recorder.metering.toFixed(1)} dB
+        </Text>
+        <Text style={styles.meta}>
+          네이티브 {recorder.nativeIsRecording ? '녹음중' : '정지'} ·{' '}
+          {formatDuration(recorder.nativeDurationSeconds)} ·{' '}
+          {(recorder.fileSize / 1024).toFixed(0)} KB
         </Text>
         {session ? <Text style={styles.meta}>세션 {session.id.slice(0, 8)}</Text> : null}
       </View>
