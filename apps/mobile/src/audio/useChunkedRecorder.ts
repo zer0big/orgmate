@@ -34,7 +34,7 @@ function chunkFileName(sessionId: string, index: number): string {
  * `enableBackgroundRecording` config plugin option, to survive screen-off and
  * app-switch.
  */
-export function useChunkedRecorder(): ChunkedRecorder {
+export function useChunkedRecorder(onChunk?: (chunk: RecordedChunk) => void): ChunkedRecorder {
   const recorder = useAudioRecorder(SPEECH_RECORDING_OPTIONS);
   const recorderState = useAudioRecorderState(recorder, 500);
 
@@ -48,6 +48,8 @@ export function useChunkedRecorder(): ChunkedRecorder {
   const rotatingRef = useRef(false);
   const tickRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
   const chunksRef = useRef<RecordedChunk[]>([]);
+  const onChunkRef = useRef(onChunk);
+  onChunkRef.current = onChunk;
 
   const pushChunk = useCallback((uri: string | null) => {
     if (!uri) {
@@ -60,6 +62,7 @@ export function useChunkedRecorder(): ChunkedRecorder {
     };
     chunksRef.current = [...chunksRef.current, chunk];
     setChunks(chunksRef.current);
+    onChunkRef.current?.(chunk);
   }, []);
 
   const clearTick = useCallback(() => {
