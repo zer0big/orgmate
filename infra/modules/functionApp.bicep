@@ -34,6 +34,9 @@ param dataStorageQueueEndpoint string
 @description('Queue that carries transcription jobs.')
 param transcribeQueueName string = 'transcribe-jobs'
 
+@description('Queue that carries template summarization jobs.')
+param summarizeQueueName string = 'summarize-jobs'
+
 @description('Locale hint passed to Speech fast transcription.')
 param transcriptionLocale string = 'ko-KR'
 
@@ -158,6 +161,10 @@ resource site 'Microsoft.Web/sites@2024-04-01' = {
         {
           name: 'ORGMATE_TRANSCRIBE_QUEUE'
           value: transcribeQueueName
+        }
+        {
+          name: 'ORGMATE_SUMMARIZE_QUEUE'
+          value: summarizeQueueName
         }
         {
           name: 'ORGMATE_TRANSCRIPTION_LOCALE'

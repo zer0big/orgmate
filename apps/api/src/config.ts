@@ -15,6 +15,7 @@ export interface OrgMateConfig {
   dataBlobEndpoint: string;
   dataQueueEndpoint: string;
   transcribeQueue: string;
+  summarizeQueue: string;
   cosmosEndpoint: string;
   cosmosDatabase: string;
   speechEndpoint: string;
@@ -29,6 +30,7 @@ export function loadConfig(): OrgMateConfig {
     dataBlobEndpoint: required('ORGMATE_DATA_BLOB_ENDPOINT'),
     dataQueueEndpoint: required('ORGMATE_DATA_QUEUE_ENDPOINT'),
     transcribeQueue: optional('ORGMATE_TRANSCRIBE_QUEUE', 'transcribe-jobs'),
+    summarizeQueue: optional('ORGMATE_SUMMARIZE_QUEUE', 'summarize-jobs'),
     cosmosEndpoint: required('ORGMATE_COSMOS_ENDPOINT'),
     cosmosDatabase: optional('ORGMATE_COSMOS_DATABASE', 'orgmate'),
     speechEndpoint: required('ORGMATE_SPEECH_ENDPOINT'),
@@ -48,6 +50,7 @@ export function describeConfig(): Record<string, boolean> {
     'ORGMATE_DATA_BLOB_ENDPOINT',
     'ORGMATE_DATA_QUEUE_ENDPOINT',
     'ORGMATE_TRANSCRIBE_QUEUE',
+    'ORGMATE_SUMMARIZE_QUEUE',
     'ORGMATE_COSMOS_ENDPOINT',
     'ORGMATE_COSMOS_DATABASE',
     'ORGMATE_SPEECH_ENDPOINT',

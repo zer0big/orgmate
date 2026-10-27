@@ -7,6 +7,14 @@ export interface SessionChunk {
   blobPath: string;
 }
 
+export interface SessionSummary {
+  templateId: string;
+  templateName: string;
+  blobPath: string;
+  markdownBlobPath: string;
+  createdAt: string;
+}
+
 export interface Session {
   id: string;
   userId: string;
@@ -19,7 +27,24 @@ export interface Session {
   transcriptPreview?: string;
   speakerCount?: number;
   transcribedAt?: string;
+  summaries?: SessionSummary[];
   error?: string;
+}
+
+export interface Template {
+  id: string;
+  name: string;
+  description: string;
+  fields: { key: string; label: string; type: string }[];
+}
+
+export interface SummaryArtifact {
+  sessionId: string;
+  templateId: string;
+  templateName: string;
+  createdAt: string;
+  data: Record<string, unknown>;
+  markdown: string;
 }
 
 export interface TranscriptSegment {
@@ -82,6 +107,21 @@ export function getSession(sessionId: string): Promise<Session> {
 
 export function getTranscript(sessionId: string): Promise<Transcript> {
   return call<Transcript>(`/sessions/${sessionId}/transcript`);
+}
+
+export function listTemplates(): Promise<{ templates: Template[] }> {
+  return call<{ templates: Template[] }>('/templates');
+}
+
+export function requestSummary(sessionId: string, templateId: string): Promise<Session> {
+  return call<Session>(`/sessions/${sessionId}/summarize`, {
+    method: 'POST',
+    body: JSON.stringify({ templateId }),
+  });
+}
+
+export function getSummary(sessionId: string, templateId: string): Promise<SummaryArtifact> {
+  return call<SummaryArtifact>(`/sessions/${sessionId}/summary?templateId=${templateId}`);
 }
 
 export function completeSession(

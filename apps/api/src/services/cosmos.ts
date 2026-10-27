@@ -27,6 +27,14 @@ export interface SessionChunk {
   durationSeconds?: number;
 }
 
+export interface SessionSummary {
+  templateId: string;
+  templateName: string;
+  blobPath: string;
+  markdownBlobPath: string;
+  createdAt: string;
+}
+
 export interface SessionDocument {
   id: string;
   userId: string;
@@ -41,6 +49,7 @@ export interface SessionDocument {
   transcriptPreview?: string;
   speakerCount?: number;
   transcribedAt?: string;
+  summaries?: SessionSummary[];
   error?: string;
 }
 
@@ -48,4 +57,11 @@ export interface SessionDocument {
 export interface TranscribeJob {
   userId: string;
   sessionId: string;
+}
+
+/** Message body carried on the summarization queue. */
+export interface SummarizeJob {
+  userId: string;
+  sessionId: string;
+  templateId: string;
 }

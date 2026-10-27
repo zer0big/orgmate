@@ -85,6 +85,19 @@ export async function uploadJson(
   });
 }
 
+export async function uploadText(
+  container: string,
+  blobPath: string,
+  text: string,
+  contentType = 'text/markdown; charset=utf-8',
+): Promise<void> {
+  const body = Buffer.from(text, 'utf8');
+  const client = blobService.getContainerClient(container).getBlockBlobClient(blobPath);
+  await client.upload(body, body.byteLength, {
+    blobHTTPHeaders: { blobContentType: contentType },
+  });
+}
+
 export async function downloadJson<T>(container: string, blobPath: string): Promise<T> {
   const buffer = await downloadBlob(container, blobPath);
   return JSON.parse(buffer.toString('utf8')) as T;

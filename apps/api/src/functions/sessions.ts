@@ -3,10 +3,12 @@ import { randomUUID } from 'node:crypto';
 import { getUser } from '../auth.js';
 import { createUploadSas, downloadJson } from '../services/storage.js';
 import { SessionDocument, sessionsContainer } from '../services/cosmos.js';
-import { enqueueTranscribeJob } from '../services/queue.js';
+import { enqueueSummarizeJob, enqueueTranscribeJob } from '../services/queue.js';
+import { findTemplate } from '../templates/systemTemplates.js';
 
 const AUDIO_CONTAINER = 'audio';
 const TRANSCRIPT_CONTAINER = 'transcripts';
+const ARTIFACT_CONTAINER = 'artifacts';
 
 function unauthorized(): HttpResponseInit {
   return { status: 401, jsonBody: { error: 'Unauthorized' } };
@@ -196,6 +198,80 @@ async function getTranscript(request: HttpRequest): Promise<HttpResponseInit> {
   return { status: 200, jsonBody: transcript };
 }
 
+async function requestSummary(
+  request: HttpRequest,
+  context: InvocationContext,
+): Promise<HttpResponseInit> {
+  const user = getUser(request);
+  if (!user) {
+    return unauthorized();
+  }
+
+  const sessionId = request.params.sessionId;
+  if (!sessionId) {
+    return badRequest('sessionId is required');
+  }
+
+  const body = (await request.json().catch(() => ({}))) as { templateId?: string };
+  if (!body.templateId || !findTemplate(body.templateId)) {
+    return badRequest('templateId must be one of the available templates');
+  }
+
+  const session = await readSession(user.userId, sessionId);
+  if (!session) {
+    return { status: 404, jsonBody: { error: 'Session not found' } };
+  }
+  if (!session.transcriptBlobPath) {
+    return {
+      status: 409,
+      jsonBody: { error: 'Transcript is not ready yet', status: session.status },
+    };
+  }
+
+  session.status = 'organizing';
+  session.error = undefined;
+  session.updatedAt = new Date().toISOString();
+  await sessionsContainer.item(sessionId, user.userId).replace(session);
+
+  await enqueueSummarizeJob({ userId: user.userId, sessionId, templateId: body.templateId });
+  context.log(`Queued ${body.templateId} summary for session ${sessionId}`);
+
+  return { status: 202, jsonBody: session };
+}
+
+async function getSummary(request: HttpRequest): Promise<HttpResponseInit> {
+  const user = getUser(request);
+  if (!user) {
+    return unauthorized();
+  }
+
+  const sessionId = request.params.sessionId;
+  if (!sessionId) {
+    return badRequest('sessionId is required');
+  }
+
+  const session = await readSession(user.userId, sessionId);
+  if (!session) {
+    return { status: 404, jsonBody: { error: 'Session not found' } };
+  }
+
+  const templateId = request.query.get('templateId');
+  const summaries = session.summaries ?? [];
+  const summary = templateId
+    ? summaries.find((item) => item.templateId === templateId)
+    : summaries[summaries.length - 1];
+
+  if (!summary) {
+    return {
+      status: 409,
+      jsonBody: { error: 'Summary is not ready yet', status: session.status },
+    };
+  }
+
+  const artifact = await downloadJson(ARTIFACT_CONTAINER, summary.blobPath);
+  return { status: 200, jsonBody: artifact };
+}
+
 app.http('createSession', {
   methods: ['POST'],
   authLevel: 'anonymous',
@@ -236,4 +312,18 @@ app.http('getTranscript', {
   authLevel: 'anonymous',
   route: 'sessions/{sessionId}/transcript',
   handler: getTranscript,
+});
+
+app.http('requestSummary', {
+  methods: ['POST'],
+  authLevel: 'anonymous',
+  route: 'sessions/{sessionId}/summarize',
+  handler: requestSummary,
+});
+
+app.http('getSummary', {
+  methods: ['GET'],
+  authLevel: 'anonymous',
+  route: 'sessions/{sessionId}/summary',
+  handler: getSummary,
 });

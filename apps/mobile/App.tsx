@@ -17,14 +17,18 @@ import {
   completeSession,
   createSession,
   getSession,
+  getSummary,
   listSessions,
+  listTemplates,
+  requestSummary,
   uploadChunk,
   type Session,
+  type Template,
 } from './src/api/client';
 
-/** How long to wait for the background transcription worker before giving up. */
-const TRANSCRIBE_POLL_INTERVAL_MS = 5000;
-const TRANSCRIBE_POLL_ATTEMPTS = 120;
+/** How long to wait for a background worker before giving up. */
+const POLL_INTERVAL_MS = 4000;
+const POLL_ATTEMPTS = 150;
 
 const STATUS_LABELS: Record<string, string> = {
   recording: '녹음 중',
@@ -36,8 +40,14 @@ const STATUS_LABELS: Record<string, string> = {
   failed: '실패',
 };
 
+const BUSY_STATUSES = new Set(['uploaded', 'transcribing', 'organizing']);
+
 function statusLabel(status: string): string {
   return STATUS_LABELS[status] ?? status;
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function formatDuration(totalSeconds: number): string {
@@ -71,6 +81,10 @@ function RecorderScreen({
 }) {
   const [session, setSession] = useState<Session | undefined>();
   const [sessions, setSessions] = useState<Session[]>([]);
+  const [templates, setTemplates] = useState<Template[]>([]);
+  const [templateId, setTemplateId] = useState<string>('meeting-minutes');
+  const [summaries, setSummaries] = useState<Record<string, string>>({});
+  const [openSummary, setOpenSummary] = useState<Record<string, boolean>>({});
   const [log, setLog] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | undefined>();
@@ -108,11 +122,12 @@ function RecorderScreen({
     }
   }, []);
 
-  /** Polls until the queue worker finishes transcribing the recording. */
-  const watchTranscription = useCallback(
-    async (sessionId: string) => {
-      for (let attempt = 0; attempt < TRANSCRIBE_POLL_ATTEMPTS; attempt += 1) {
-        await new Promise((resolve) => setTimeout(resolve, TRANSCRIBE_POLL_INTERVAL_MS));
+  /** Polls until a background worker moves the session to one of the targets. */
+  const waitForStatus = useCallback(
+    async (sessionId: string, targets: string[], label: string): Promise<Session | undefined> => {
+      for (let attempt = 0; attempt < POLL_ATTEMPTS; attempt += 1) {
+        await delay(POLL_INTERVAL_MS);
+
         let latest: Session;
         try {
           latest = await getSession(sessionId);
@@ -121,29 +136,87 @@ function RecorderScreen({
           continue;
         }
 
+        setSessions((previous) =>
+          previous.map((item) => (item.id === sessionId ? latest : item)),
+        );
         if (sessionRef.current?.id === sessionId) {
           setSession(latest);
         }
 
-        if (latest.status === 'transcribed') {
-          append(`전사 완료 (화자 ${latest.speakerCount ?? 0}명)`);
-          await refresh();
-          return;
+        if (targets.includes(latest.status)) {
+          append(`${label} 완료`);
+          return latest;
         }
         if (latest.status === 'failed') {
-          append(`전사 실패: ${latest.error ?? '알 수 없는 오류'}`);
-          await refresh();
-          return;
+          append(`${label} 실패: ${latest.error ?? '알 수 없는 오류'}`);
+          return latest;
         }
       }
-      append('전사가 예상보다 오래 걸린다. 목록을 새로고침해 확인한다.');
+
+      append(`${label}가 예상보다 오래 걸린다.`);
+      return undefined;
     },
-    [append, refresh],
+    [append],
+  );
+
+  const onOrganize = useCallback(
+    async (target: Session) => {
+      setError(undefined);
+      const template = templates.find((item) => item.id === templateId);
+      append(`정리 요청: ${template?.name ?? templateId}`);
+
+      try {
+        const queued = await requestSummary(target.id, templateId);
+        setSessions((previous) =>
+          previous.map((item) => (item.id === target.id ? queued : item)),
+        );
+
+        const done = await waitForStatus(target.id, ['organized'], '정리');
+        if (done?.status !== 'organized') {
+          return;
+        }
+
+        const artifact = await getSummary(target.id, templateId);
+        setSummaries((previous) => ({ ...previous, [target.id]: artifact.markdown }));
+        setOpenSummary((previous) => ({ ...previous, [target.id]: true }));
+      } catch (cause) {
+        setError(String(cause));
+      }
+    },
+    [append, templateId, templates, waitForStatus],
+  );
+
+  const onShowSummary = useCallback(
+    async (target: Session) => {
+      const isOpen = openSummary[target.id];
+      setOpenSummary((previous) => ({ ...previous, [target.id]: !isOpen }));
+      if (isOpen || summaries[target.id]) {
+        return;
+      }
+
+      const saved = target.summaries?.[target.summaries.length - 1];
+      if (!saved) {
+        return;
+      }
+      try {
+        const artifact = await getSummary(target.id, saved.templateId);
+        setSummaries((previous) => ({ ...previous, [target.id]: artifact.markdown }));
+      } catch (cause) {
+        setError(String(cause));
+      }
+    },
+    [openSummary, summaries],
   );
 
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  useEffect(() => {
+    listTemplates()
+      .then((result) => setTemplates(result.templates))
+      .catch((cause: unknown) => setError(String(cause)));
+  }, []);
 
   useEffect(() => {
     const subscription = AppState.addEventListener('change', (state) => {
@@ -183,15 +256,17 @@ function RecorderScreen({
         const updated = await completeSession(current.id, recorded.length, elapsed);
         setSession(updated);
         append(`세션 완료 (청크 ${recorded.length}개) · 전사 대기`);
-        void watchTranscription(current.id);
+        await refresh();
+        void waitForStatus(current.id, ['transcribed', 'organized'], '전사');
+      } else {
+        await refresh();
       }
-      await refresh();
     } catch (cause) {
       setError(String(cause));
     } finally {
       setBusy(false);
     }
-  }, [append, recorder, refresh, watchTranscription]);
+  }, [append, recorder, refresh, waitForStatus]);
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
@@ -243,26 +318,77 @@ function RecorderScreen({
       {recorder.error ? <Text style={styles.error}>{recorder.error}</Text> : null}
       {error ? <Text style={styles.error}>{error}</Text> : null}
 
+      <Text style={styles.sectionTitle}>정리 템플릿</Text>
+      <View style={styles.chipRow}>
+        {templates.map((item) => (
+          <Pressable
+            key={item.id}
+            onPress={() => setTemplateId(item.id)}
+            style={[styles.chip, templateId === item.id && styles.chipActive]}
+          >
+            <Text style={[styles.chipLabel, templateId === item.id && styles.chipLabelActive]}>
+              {item.name}
+            </Text>
+          </Pressable>
+        ))}
+      </View>
+      <Text style={styles.meta}>
+        {templates.find((item) => item.id === templateId)?.description ?? ''}
+      </Text>
+
       <Text style={styles.sectionTitle}>내 세션</Text>
       {sessions.length === 0 ? (
         <Text style={styles.meta}>아직 없음</Text>
       ) : (
-        sessions.map((item) => (
-          <View key={item.id} style={styles.row}>
-            <Text style={styles.rowTitle}>{item.title}</Text>
-            <Text style={styles.meta}>
-              {statusLabel(item.status)} · 청크 {item.chunks.length}개
-              {item.durationSeconds ? ` · ${formatDuration(item.durationSeconds)}` : ''}
-              {item.speakerCount ? ` · 화자 ${item.speakerCount}명` : ''}
-            </Text>
-            {item.transcriptPreview ? (
-              <Text style={styles.preview} numberOfLines={3}>
-                {item.transcriptPreview}
-              </Text>
-            ) : null}
-            {item.error ? <Text style={styles.error}>{item.error}</Text> : null}
-          </View>
-        ))
+        sessions.map((item) => {
+          const working = BUSY_STATUSES.has(item.status);
+          const canOrganize = item.status === 'transcribed' || item.status === 'organized';
+          const hasSummary = (item.summaries?.length ?? 0) > 0;
+          return (
+            <View key={item.id} style={styles.row}>
+              <Text style={styles.rowTitle}>{item.title}</Text>
+              <View style={styles.statusRow}>
+                {working ? <ActivityIndicator size="small" color="#1570EF" /> : null}
+                <Text style={styles.meta}>
+                  {statusLabel(item.status)} · 청크 {item.chunks.length}개
+                  {item.durationSeconds ? ` · ${formatDuration(item.durationSeconds)}` : ''}
+                  {item.speakerCount ? ` · 화자 ${item.speakerCount}명` : ''}
+                </Text>
+              </View>
+              {item.transcriptPreview ? (
+                <Text style={styles.preview} numberOfLines={3}>
+                  {item.transcriptPreview}
+                </Text>
+              ) : null}
+              {item.error ? <Text style={styles.error}>{item.error}</Text> : null}
+
+              {canOrganize ? (
+                <View style={styles.actionRow}>
+                  <Pressable
+                    onPress={() => void onOrganize(item)}
+                    style={[styles.smallButton, styles.buttonStart]}
+                  >
+                    <Text style={styles.smallButtonLabel}>정리</Text>
+                  </Pressable>
+                  {hasSummary ? (
+                    <Pressable
+                      onPress={() => void onShowSummary(item)}
+                      style={[styles.smallButton, styles.smallButtonGhost]}
+                    >
+                      <Text style={styles.smallButtonGhostLabel}>
+                        {openSummary[item.id] ? '결과 접기' : '결과 보기'}
+                      </Text>
+                    </Pressable>
+                  ) : null}
+                </View>
+              ) : null}
+
+              {openSummary[item.id] && summaries[item.id] ? (
+                <Text style={styles.summary}>{summaries[item.id]}</Text>
+              ) : null}
+            </View>
+          );
+        })
       )}
 
       <Text style={styles.sectionTitle}>로그</Text>
@@ -335,5 +461,32 @@ const styles = StyleSheet.create({
   },
   rowTitle: { fontWeight: '600', color: '#101828' },
   preview: { fontSize: 12, color: '#344054', lineHeight: 17 },
+  statusRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  chip: {
+    borderRadius: 999,
+    paddingVertical: 7,
+    paddingHorizontal: 13,
+    borderWidth: 1,
+    borderColor: '#D0D5DD',
+    backgroundColor: '#FFFFFF',
+  },
+  chipActive: { backgroundColor: '#1570EF', borderColor: '#1570EF' },
+  chipLabel: { fontSize: 13, color: '#344054', fontWeight: '500' },
+  chipLabelActive: { color: '#FFFFFF' },
+  actionRow: { flexDirection: 'row', gap: 8, marginTop: 4 },
+  smallButton: { borderRadius: 8, paddingVertical: 8, paddingHorizontal: 16 },
+  smallButtonLabel: { color: '#FFFFFF', fontSize: 13, fontWeight: '600' },
+  smallButtonGhost: { backgroundColor: '#EFF4FF' },
+  smallButtonGhostLabel: { color: '#1570EF', fontSize: 13, fontWeight: '600' },
+  summary: {
+    fontSize: 12,
+    color: '#101828',
+    lineHeight: 18,
+    backgroundColor: '#F9FAFB',
+    borderRadius: 8,
+    padding: 12,
+    marginTop: 4,
+  },
   logLine: { fontSize: 11, color: '#667085' },
 });

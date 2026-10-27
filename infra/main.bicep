@@ -68,6 +68,7 @@ module dataStorage 'modules/storage.bicep' = {
     ]
     queues: [
       'transcribe-jobs'
+      'summarize-jobs'
     ]
     enableLifecycleTiering: true
     enableBlobSoftDelete: true
