@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   AppState,
+  Image,
   Pressable,
   SafeAreaView,
   ScrollView,
+  Share,
   StatusBar,
   StyleSheet,
   Text,
@@ -14,19 +17,24 @@ import { useAuth } from './src/auth/useAuth';
 import { useChunkedRecorder, type RecordedChunk } from './src/audio/useChunkedRecorder';
 import { CHUNK_SECONDS } from './src/audio/recordingOptions';
 import {
+  archiveSession,
   completeSession,
   createSession,
+  deleteSession,
   getSession,
   getSummary,
   listSessions,
   listTemplates,
   requestSummary,
+  retranscribeSession,
   uploadChunk,
   type Session,
   type SummaryArtifact,
   type Template,
 } from './src/api/client';
 import { SummaryView } from './src/components/SummaryView';
+
+const LOGO = require('./assets/logo.png');
 
 /** How long to wait for a background worker before giving up. */
 const POLL_INTERVAL_MS = 4000;
@@ -43,6 +51,16 @@ const STATUS_LABELS: Record<string, string> = {
 };
 
 const BUSY_STATUSES = new Set(['uploaded', 'transcribing', 'organizing']);
+
+/** A session that stopped progressing is treated as stalled, not as in-flight work. */
+const STALL_AFTER_MS = 5 * 60 * 1000;
+
+function isStalled(session: Session): boolean {
+  if (!BUSY_STATUSES.has(session.status)) {
+    return false;
+  }
+  return Date.now() - new Date(session.updatedAt).getTime() > STALL_AFTER_MS;
+}
 
 function statusLabel(status: string): string {
   return STATUS_LABELS[status] ?? status;
@@ -64,6 +82,7 @@ function formatDuration(totalSeconds: number): string {
 function SignInScreen({ onSignIn, error }: { onSignIn: () => void; error?: string }) {
   return (
     <View style={styles.centered}>
+      <Image source={LOGO} style={styles.logoLarge} resizeMode="contain" />
       <Text style={styles.title}>OrgMate</Text>
       <Text style={styles.subtitle}>회의를 녹음하고 템플릿에 맞춰 자동으로 정리한다.</Text>
       <Pressable style={[styles.button, styles.buttonStart]} onPress={onSignIn}>
@@ -88,6 +107,7 @@ function RecorderScreen({
   const [summaries, setSummaries] = useState<Record<string, SummaryArtifact>>({});
   const [openSummary, setOpenSummary] = useState<Record<string, boolean>>({});
   const [organizingId, setOrganizingId] = useState<string | undefined>();
+  const [showArchived, setShowArchived] = useState(false);
   const [log, setLog] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | undefined>();
@@ -118,12 +138,12 @@ function RecorderScreen({
 
   const refresh = useCallback(async () => {
     try {
-      const result = await listSessions();
+      const result = await listSessions(showArchived);
       setSessions(result.sessions);
     } catch (cause) {
       setError(String(cause));
     }
-  }, []);
+  }, [showArchived]);
 
   /** Polls until a background worker moves the session to one of the targets. */
   const waitForStatus = useCallback(
@@ -214,6 +234,88 @@ function RecorderScreen({
     [openSummary, summaries],
   );
 
+  const onRetranscribe = useCallback(
+    async (target: Session) => {
+      setError(undefined);
+      append(`전사 재시작: ${target.title}`);
+      try {
+        const queued = await retranscribeSession(target.id);
+        setSessions((previous) =>
+          previous.map((item) => (item.id === target.id ? queued : item)),
+        );
+        void waitForStatus(target.id, ['transcribed', 'organized'], '전사');
+      } catch (cause) {
+        setError(String(cause));
+      }
+    },
+    [append, waitForStatus],
+  );
+
+  const onArchive = useCallback(
+    async (target: Session) => {
+      const archived = !target.archivedAt;
+      try {
+        await archiveSession(target.id, archived);
+        append(`${target.title} ${archived ? '보관함으로 이동' : '보관 해제'}`);
+        await refresh();
+      } catch (cause) {
+        setError(String(cause));
+      }
+    },
+    [append, refresh],
+  );
+
+  const onDelete = useCallback(
+    (target: Session) => {
+      Alert.alert(
+        '세션 삭제',
+        `"${target.title}"의 녹음 파일, 전사본, 정리본을 모두 영구 삭제한다. 되돌릴 수 없다.`,
+        [
+          { text: '취소', style: 'cancel' },
+          {
+            text: '삭제',
+            style: 'destructive',
+            onPress: () => {
+              void (async () => {
+                try {
+                  await deleteSession(target.id);
+                  append(`${target.title} 삭제 완료`);
+                  setSessions((previous) => previous.filter((item) => item.id !== target.id));
+                } catch (cause) {
+                  setError(String(cause));
+                }
+              })();
+            },
+          },
+        ],
+      );
+    },
+    [append],
+  );
+
+  const onShare = useCallback(
+    async (target: Session) => {
+      try {
+        let artifact = summaries[target.id];
+        if (!artifact) {
+          const saved = target.summaries?.[target.summaries.length - 1];
+          if (!saved) {
+            return;
+          }
+          artifact = await getSummary(target.id, saved.templateId);
+          setSummaries((previous) => ({ ...previous, [target.id]: artifact }));
+        }
+        await Share.share({
+          title: `${target.title} · ${artifact.templateName}`,
+          message: artifact.markdown,
+        });
+      } catch (cause) {
+        setError(String(cause));
+      }
+    },
+    [summaries],
+  );
+
   useEffect(() => {
     void refresh();
   }, [refresh]);
@@ -277,12 +379,17 @@ function RecorderScreen({
   return (
     <ScrollView contentContainerStyle={styles.container}>
       <View style={styles.headerRow}>
-        <Text style={styles.title}>OrgMate</Text>
+        <View style={styles.brandRow}>
+          <Image source={LOGO} style={styles.logo} resizeMode="contain" />
+          <View>
+            <Text style={styles.title}>OrgMate</Text>
+            {displayName ? <Text style={styles.brandMeta}>{displayName}</Text> : null}
+          </View>
+        </View>
         <Pressable onPress={onSignOut}>
           <Text style={styles.link}>로그아웃</Text>
         </Pressable>
       </View>
-      {displayName ? <Text style={styles.meta}>{displayName}</Text> : null}
 
       <View style={styles.card}>
         <Text style={styles.timer}>{formatDuration(recorder.elapsedSeconds)}</Text>
@@ -345,23 +452,34 @@ function RecorderScreen({
         선택한 템플릿은 아래에서 "정리"를 누른 세션 하나에만 적용된다. 세션은 각각 따로 정리된다.
       </Text>
 
-      <Text style={styles.sectionTitle}>내 세션</Text>
+      <View style={styles.sectionHeader}>
+        <Text style={styles.sectionTitle}>내 세션</Text>
+        <Pressable onPress={() => setShowArchived((previous) => !previous)}>
+          <Text style={styles.link}>{showArchived ? '활성만 보기' : '보관함 포함'}</Text>
+        </Pressable>
+      </View>
       {sessions.length === 0 ? (
         <Text style={styles.meta}>아직 없음</Text>
       ) : (
         sessions.map((item) => {
-          const working = BUSY_STATUSES.has(item.status);
+          const stalled = isStalled(item);
+          const working = BUSY_STATUSES.has(item.status) && !stalled;
           const isOrganizing = organizingId === item.id;
           const canOrganize = item.status === 'transcribed' || item.status === 'organized';
+          const canTranscribe =
+            item.chunks.length > 0 && (stalled || item.status === 'failed');
           const artifact = summaries[item.id];
           const hasSummary = (item.summaries?.length ?? 0) > 0;
           return (
             <View key={item.id} style={[styles.row, isOrganizing && styles.rowActive]}>
-              <Text style={styles.rowTitle}>{item.title}</Text>
+              <Text style={styles.rowTitle}>
+                {item.archivedAt ? '[보관] ' : ''}
+                {item.title}
+              </Text>
               <View style={styles.statusRow}>
                 {working ? <ActivityIndicator size="small" color="#1570EF" /> : null}
                 <Text style={styles.meta}>
-                  {statusLabel(item.status)} · 청크 {item.chunks.length}개
+                  {stalled ? '중단됨' : statusLabel(item.status)} · 청크 {item.chunks.length}개
                   {item.durationSeconds ? ` · ${formatDuration(item.durationSeconds)}` : ''}
                   {item.speakerCount ? ` · 화자 ${item.speakerCount}명` : ''}
                 </Text>
@@ -378,8 +496,16 @@ function RecorderScreen({
               ) : null}
               {item.error ? <Text style={styles.error}>{item.error}</Text> : null}
 
-              {canOrganize ? (
-                <View style={styles.actionRow}>
+              <View style={styles.actionRow}>
+                {canTranscribe ? (
+                  <Pressable
+                    onPress={() => void onRetranscribe(item)}
+                    style={[styles.smallButton, styles.buttonStart]}
+                  >
+                    <Text style={styles.smallButtonLabel}>전사 시작</Text>
+                  </Pressable>
+                ) : null}
+                {canOrganize ? (
                   <Pressable
                     disabled={organizingId !== undefined}
                     onPress={() => void onOrganize(item)}
@@ -397,18 +523,40 @@ function RecorderScreen({
                           }`}
                     </Text>
                   </Pressable>
-                  {hasSummary ? (
-                    <Pressable
-                      onPress={() => void onShowSummary(item)}
-                      style={[styles.smallButton, styles.smallButtonGhost]}
-                    >
-                      <Text style={styles.smallButtonGhostLabel}>
-                        {openSummary[item.id] ? '결과 접기' : '결과 보기'}
-                      </Text>
-                    </Pressable>
-                  ) : null}
-                </View>
-              ) : null}
+                ) : null}
+                {hasSummary ? (
+                  <Pressable
+                    onPress={() => void onShowSummary(item)}
+                    style={[styles.smallButton, styles.smallButtonGhost]}
+                  >
+                    <Text style={styles.smallButtonGhostLabel}>
+                      {openSummary[item.id] ? '결과 접기' : '결과 보기'}
+                    </Text>
+                  </Pressable>
+                ) : null}
+                {hasSummary ? (
+                  <Pressable
+                    onPress={() => void onShare(item)}
+                    style={[styles.smallButton, styles.smallButtonGhost]}
+                  >
+                    <Text style={styles.smallButtonGhostLabel}>공유 / 내보내기</Text>
+                  </Pressable>
+                ) : null}
+                <Pressable
+                  onPress={() => void onArchive(item)}
+                  style={[styles.smallButton, styles.smallButtonGhost]}
+                >
+                  <Text style={styles.smallButtonGhostLabel}>
+                    {item.archivedAt ? '보관 해제' : '보관'}
+                  </Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => onDelete(item)}
+                  style={[styles.smallButton, styles.smallButtonDanger]}
+                >
+                  <Text style={styles.smallButtonDangerLabel}>삭제</Text>
+                </Pressable>
+              </View>
 
               {openSummary[item.id] && artifact ? <SummaryView artifact={artifact} /> : null}
             </View>
@@ -450,6 +598,15 @@ const styles = StyleSheet.create({
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, gap: 16 },
   container: { padding: 24, gap: 14 },
   headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  brandRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  logo: { width: 46, height: 28 },
+  logoLarge: { width: 160, height: 76 },
+  brandMeta: { fontSize: 12, color: '#667085' },
+  sectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-end',
+  },
   title: { fontSize: 26, fontWeight: '700', color: '#101828' },
   subtitle: { fontSize: 14, lineHeight: 20, color: '#475467', textAlign: 'center' },
   link: { fontSize: 14, color: '#1570EF', fontWeight: '600' },
@@ -501,10 +658,12 @@ const styles = StyleSheet.create({
   chipActive: { backgroundColor: '#1570EF', borderColor: '#1570EF' },
   chipLabel: { fontSize: 13, color: '#344054', fontWeight: '500' },
   chipLabelActive: { color: '#FFFFFF' },
-  actionRow: { flexDirection: 'row', gap: 8, marginTop: 4 },
-  smallButton: { borderRadius: 8, paddingVertical: 8, paddingHorizontal: 16 },
+  actionRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 6 },
+  smallButton: { borderRadius: 8, paddingVertical: 8, paddingHorizontal: 14 },
   smallButtonLabel: { color: '#FFFFFF', fontSize: 13, fontWeight: '600' },
   smallButtonGhost: { backgroundColor: '#EFF4FF' },
   smallButtonGhostLabel: { color: '#1570EF', fontSize: 13, fontWeight: '600' },
+  smallButtonDanger: { backgroundColor: '#FEF3F2' },
+  smallButtonDangerLabel: { color: '#B42318', fontSize: 13, fontWeight: '600' },
   logLine: { fontSize: 11, color: '#667085' },
 });

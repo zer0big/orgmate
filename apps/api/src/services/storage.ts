@@ -102,3 +102,16 @@ export async function downloadJson<T>(container: string, blobPath: string): Prom
   const buffer = await downloadBlob(container, blobPath);
   return JSON.parse(buffer.toString('utf8')) as T;
 }
+
+/** Removes every blob under a prefix. Used when a session is deleted. */
+export async function deleteBlobsByPrefix(container: string, prefix: string): Promise<number> {
+  const containerClient = blobService.getContainerClient(container);
+  let removed = 0;
+  for await (const blob of containerClient.listBlobsFlat({ prefix })) {
+    await containerClient.getBlockBlobClient(blob.name).deleteIfExists({
+      deleteSnapshots: 'include',
+    });
+    removed += 1;
+  }
+  return removed;
+}

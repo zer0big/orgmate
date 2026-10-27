@@ -50,6 +50,8 @@ export interface SessionDocument {
   speakerCount?: number;
   transcribedAt?: string;
   summaries?: SessionSummary[];
+  /** Set when the user archives the session. Archived sessions are hidden by default. */
+  archivedAt?: string;
   error?: string;
 }
 

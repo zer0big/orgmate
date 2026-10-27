@@ -1,7 +1,7 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/functions';
 import { randomUUID } from 'node:crypto';
 import { getUser } from '../auth.js';
-import { createUploadSas, downloadJson } from '../services/storage.js';
+import { createUploadSas, deleteBlobsByPrefix, downloadJson } from '../services/storage.js';
 import { SessionDocument, sessionsContainer } from '../services/cosmos.js';
 import { enqueueSummarizeJob, enqueueTranscribeJob } from '../services/queue.js';
 import { findTemplate } from '../templates/systemTemplates.js';
@@ -67,9 +67,12 @@ async function listSessions(request: HttpRequest): Promise<HttpResponseInit> {
     return unauthorized();
   }
 
+  const includeArchived = request.query.get('includeArchived') === 'true';
+  const filter = includeArchived ? '' : ' AND NOT IS_DEFINED(c.archivedAt)';
+
   const { resources } = await sessionsContainer.items
     .query<SessionDocument>({
-      query: 'SELECT * FROM c WHERE c.userId = @userId ORDER BY c.createdAt DESC',
+      query: `SELECT * FROM c WHERE c.userId = @userId${filter} ORDER BY c.createdAt DESC`,
       parameters: [{ name: '@userId', value: user.userId }],
     })
     .fetchAll();
@@ -239,6 +242,103 @@ async function requestSummary(
   return { status: 202, jsonBody: session };
 }
 
+/**
+ * Re-queues transcription for a session that is stuck. Sessions created before the
+ * transcription pipeline existed never got a queue message, so they sit in `uploaded`
+ * forever; this is also the retry path for a failed transcription.
+ */
+async function retranscribeSession(
+  request: HttpRequest,
+  context: InvocationContext,
+): Promise<HttpResponseInit> {
+  const user = getUser(request);
+  if (!user) {
+    return unauthorized();
+  }
+
+  const sessionId = request.params.sessionId;
+  if (!sessionId) {
+    return badRequest('sessionId is required');
+  }
+
+  const session = await readSession(user.userId, sessionId);
+  if (!session) {
+    return { status: 404, jsonBody: { error: 'Session not found' } };
+  }
+  if (session.chunks.length === 0) {
+    return badRequest('Session has no uploaded audio');
+  }
+
+  session.status = 'uploaded';
+  session.error = undefined;
+  session.updatedAt = new Date().toISOString();
+  await sessionsContainer.item(sessionId, user.userId).replace(session);
+
+  await enqueueTranscribeJob({ userId: user.userId, sessionId });
+  context.log(`Re-queued transcription for session ${sessionId}`);
+
+  return { status: 202, jsonBody: session };
+}
+
+/** Archives or restores a session. Archived sessions are hidden from the default list. */
+async function archiveSession(request: HttpRequest): Promise<HttpResponseInit> {
+  const user = getUser(request);
+  if (!user) {
+    return unauthorized();
+  }
+
+  const sessionId = request.params.sessionId;
+  if (!sessionId) {
+    return badRequest('sessionId is required');
+  }
+
+  const session = await readSession(user.userId, sessionId);
+  if (!session) {
+    return { status: 404, jsonBody: { error: 'Session not found' } };
+  }
+
+  const body = (await request.json().catch(() => ({}))) as { archived?: boolean };
+  const archived = body.archived !== false;
+  session.archivedAt = archived ? new Date().toISOString() : undefined;
+  session.updatedAt = new Date().toISOString();
+  await sessionsContainer.item(sessionId, user.userId).replace(session);
+
+  return { status: 200, jsonBody: session };
+}
+
+/** Permanently removes the session document plus every blob it produced. */
+async function deleteSession(
+  request: HttpRequest,
+  context: InvocationContext,
+): Promise<HttpResponseInit> {
+  const user = getUser(request);
+  if (!user) {
+    return unauthorized();
+  }
+
+  const sessionId = request.params.sessionId;
+  if (!sessionId) {
+    return badRequest('sessionId is required');
+  }
+
+  const session = await readSession(user.userId, sessionId);
+  if (!session) {
+    return { status: 404, jsonBody: { error: 'Session not found' } };
+  }
+
+  const prefix = `${user.userId}/${sessionId}/`;
+  const removed = await Promise.all([
+    deleteBlobsByPrefix(AUDIO_CONTAINER, prefix),
+    deleteBlobsByPrefix(TRANSCRIPT_CONTAINER, prefix),
+    deleteBlobsByPrefix(ARTIFACT_CONTAINER, prefix),
+  ]);
+
+  await sessionsContainer.item(sessionId, user.userId).delete();
+  context.log(`Deleted session ${sessionId} and ${removed.reduce((a, b) => a + b, 0)} blob(s)`);
+
+  return { status: 204 };
+}
+
 async function getSummary(request: HttpRequest): Promise<HttpResponseInit> {
   const user = getUser(request);
   if (!user) {
@@ -326,4 +426,25 @@ app.http('getSummary', {
   authLevel: 'anonymous',
   route: 'sessions/{sessionId}/summary',
   handler: getSummary,
+});
+
+app.http('retranscribeSession', {
+  methods: ['POST'],
+  authLevel: 'anonymous',
+  route: 'sessions/{sessionId}/transcribe',
+  handler: retranscribeSession,
+});
+
+app.http('archiveSession', {
+  methods: ['POST'],
+  authLevel: 'anonymous',
+  route: 'sessions/{sessionId}/archive',
+  handler: archiveSession,
+});
+
+app.http('deleteSession', {
+  methods: ['DELETE'],
+  authLevel: 'anonymous',
+  route: 'sessions/{sessionId}',
+  handler: deleteSession,
 });

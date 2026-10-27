@@ -28,6 +28,7 @@ export interface Session {
   speakerCount?: number;
   transcribedAt?: string;
   summaries?: SessionSummary[];
+  archivedAt?: string;
   error?: string;
 }
 
@@ -105,6 +106,10 @@ async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
     throw new Error(`${init.method ?? 'GET'} ${path} 실패 (${response.status}): ${detail}`);
   }
 
+  if (response.status === 204) {
+    return undefined as T;
+  }
+
   return (await response.json()) as T;
 }
 
@@ -112,8 +117,23 @@ export function createSession(title?: string): Promise<Session> {
   return call<Session>('/sessions', { method: 'POST', body: JSON.stringify({ title }) });
 }
 
-export function listSessions(): Promise<{ sessions: Session[] }> {
-  return call<{ sessions: Session[] }>('/sessions');
+export function listSessions(includeArchived = false): Promise<{ sessions: Session[] }> {
+  return call<{ sessions: Session[] }>(`/sessions?includeArchived=${includeArchived}`);
+}
+
+export function retranscribeSession(sessionId: string): Promise<Session> {
+  return call<Session>(`/sessions/${sessionId}/transcribe`, { method: 'POST' });
+}
+
+export function archiveSession(sessionId: string, archived: boolean): Promise<Session> {
+  return call<Session>(`/sessions/${sessionId}/archive`, {
+    method: 'POST',
+    body: JSON.stringify({ archived }),
+  });
+}
+
+export function deleteSession(sessionId: string): Promise<void> {
+  return call<void>(`/sessions/${sessionId}`, { method: 'DELETE' });
 }
 
 export function getSession(sessionId: string): Promise<Session> {
