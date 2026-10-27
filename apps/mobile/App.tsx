@@ -92,8 +92,18 @@ function meterRatio(metering?: number): number {
 function Brand({ styles }: { styles: AppStyles }) {
   return (
     <View style={styles.brand}>
-      <Image source={LOGO} style={styles.brandLogo} resizeMode="contain" />
       <Text style={styles.brandName}>OrgMate</Text>
+      <Text style={styles.brandTagline}>녹음하고, 한 번에 정리한다</Text>
+    </View>
+  );
+}
+
+/** Quiet brand mark that closes the page instead of competing with the wordmark. */
+function FooterBrand({ styles }: { styles: AppStyles }) {
+  return (
+    <View style={styles.footerBrand}>
+      <View style={styles.footerLine} />
+      <Image source={LOGO} style={styles.footerLogo} resizeMode="contain" />
     </View>
   );
 }
@@ -679,9 +689,6 @@ function RecorderScreen({ onSignOut }: { onSignOut: () => void }) {
               </Pressable>
             ))}
           </View>
-          {activeTemplate ? (
-            <Text style={styles.sectionHint}>{activeTemplate.description}</Text>
-          ) : null}
         </View>
 
         <View style={styles.section}>
@@ -692,33 +699,29 @@ function RecorderScreen({ onSignOut }: { onSignOut: () => void }) {
             </Pressable>
           </View>
 
-          {sessions.length === 0 ? (
-            <Text style={styles.sectionHint}>아직 녹음이 없다.</Text>
-          ) : (
-            sessions.map((item) => (
-              <SessionCard
-                key={item.id}
-                session={item}
-                styles={styles}
-                theme={theme}
-                templateName={activeTemplate?.name ?? '선택한 템플릿'}
-                artifact={summaries[item.id]}
-                expanded={Boolean(expanded[item.id])}
-                organizing={organizingId === item.id}
-                busyElsewhere={organizingId !== undefined}
-                summaryOpen={Boolean(openSummary[item.id])}
-                onToggleExpand={() =>
-                  setExpanded((previous) => ({ ...previous, [item.id]: !previous[item.id] }))
-                }
-                onOrganize={() => void onOrganize(item)}
-                onToggleSummary={() => void onToggleSummary(item)}
-                onRetranscribe={() => void onRetranscribe(item)}
-                onShare={() => void onShare(item)}
-                onArchive={() => void onArchive(item)}
-                onDelete={() => onDelete(item)}
-              />
-            ))
-          )}
+          {sessions.map((item) => (
+            <SessionCard
+              key={item.id}
+              session={item}
+              styles={styles}
+              theme={theme}
+              templateName={activeTemplate?.name ?? '선택한 템플릿'}
+              artifact={summaries[item.id]}
+              expanded={Boolean(expanded[item.id])}
+              organizing={organizingId === item.id}
+              busyElsewhere={organizingId !== undefined}
+              summaryOpen={Boolean(openSummary[item.id])}
+              onToggleExpand={() =>
+                setExpanded((previous) => ({ ...previous, [item.id]: !previous[item.id] }))
+              }
+              onOrganize={() => void onOrganize(item)}
+              onToggleSummary={() => void onToggleSummary(item)}
+              onRetranscribe={() => void onRetranscribe(item)}
+              onShare={() => void onShare(item)}
+              onArchive={() => void onArchive(item)}
+              onDelete={() => onDelete(item)}
+            />
+          ))}
         </View>
 
         {showDetails ? (
@@ -744,6 +747,8 @@ function RecorderScreen({ onSignOut }: { onSignOut: () => void }) {
             ))}
           </View>
         ) : null}
+
+        <FooterBrand styles={styles} />
       </ScrollView>
 
       <SettingsSheet
@@ -792,12 +797,12 @@ type AppStyles = ReturnType<typeof createStyles>;
 function createStyles(theme: Theme) {
   return StyleSheet.create({
     safeArea: { flex: 1, backgroundColor: theme.bg, paddingTop: STATUS_BAR_INSET },
-    page: { paddingHorizontal: 20, paddingTop: 12, paddingBottom: 40, gap: 24 },
+    page: { paddingHorizontal: 20, paddingTop: 14, paddingBottom: 12, gap: 22 },
 
-    header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end' },
-    brand: { gap: 4 },
-    brandLogo: { width: 46, height: 22, opacity: 0.9 },
-    brandName: { fontSize: 22, fontWeight: '800', color: theme.text, letterSpacing: -0.4 },
+    header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+    brand: { gap: 2 },
+    brandName: { fontSize: 25, fontWeight: '800', color: theme.text, letterSpacing: -0.5 },
+    brandTagline: { fontSize: 12, color: theme.textMuted },
     settingsButton: {
       width: 38,
       height: 38,
@@ -810,6 +815,10 @@ function createStyles(theme: Theme) {
       borderColor: theme.border,
     },
     settingsDot: { width: 3.5, height: 3.5, borderRadius: 2, backgroundColor: theme.textMuted },
+
+    footerBrand: { alignItems: 'center', gap: 16, paddingTop: 12, paddingBottom: 24 },
+    footerLine: { width: 28, height: 1, backgroundColor: theme.border },
+    footerLogo: { width: 72, height: 34, opacity: 0.45 },
 
     recorder: {
       backgroundColor: theme.surface,
@@ -853,7 +862,6 @@ function createStyles(theme: Theme) {
     section: { gap: 10 },
     sectionHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
     sectionTitle: { fontSize: 13, fontWeight: '700', color: theme.textMuted, letterSpacing: 0.4 },
-    sectionHint: { fontSize: 12, lineHeight: 18, color: theme.textMuted },
     linkLabel: { fontSize: 12, fontWeight: '600', color: theme.accent },
 
     chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
