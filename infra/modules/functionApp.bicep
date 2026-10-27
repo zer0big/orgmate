@@ -49,6 +49,14 @@ param entraClientId string = ''
 @description('Entra ID tenant id used by Easy Auth.')
 param entraTenantId string = subscription().tenantId
 
+@description('Client application ids allowed to call the API. Empty means any application in the tenant.')
+param allowedClientApplicationIds array = []
+
+@description('Request paths that bypass Easy Auth, such as the health probe.')
+param authExcludedPaths array = [
+  '/api/health'
+]
+
 @description('Memory per instance in MB.')
 @allowed([
   512
@@ -167,6 +175,7 @@ resource authSettings 'Microsoft.Web/sites/config@2024-04-01' = if (!empty(entra
       requireAuthentication: true
       unauthenticatedClientAction: 'Return401'
       redirectToProvider: 'azureactivedirectory'
+      excludedPaths: authExcludedPaths
     }
     identityProviders: {
       azureActiveDirectory: {
@@ -177,7 +186,7 @@ resource authSettings 'Microsoft.Web/sites/config@2024-04-01' = if (!empty(entra
         }
         validation: {
           defaultAuthorizationPolicy: {
-            allowedApplications: []
+            allowedApplications: allowedClientApplicationIds
           }
           allowedAudiences: [
             'api://${entraClientId}'

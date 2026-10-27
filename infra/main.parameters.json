@@ -22,6 +22,12 @@
     },
     "developerPrincipalId": {
       "value": "${AZURE_PRINCIPAL_ID}"
+    },
+    "apiClientId": {
+      "value": "${ORGMATE_API_CLIENT_ID=}"
+    },
+    "mobileClientId": {
+      "value": "${ORGMATE_MOBILE_CLIENT_ID=}"
     }
   }
 }

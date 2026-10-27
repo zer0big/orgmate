@@ -1,0 +1,48 @@
+{
+  "expo": {
+    "name": "OrgMate",
+    "slug": "orgmate",
+    "scheme": "orgmate",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.orgmate.app"
+    },
+    "android": {
+      "package": "com.orgmate.app",
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "OrgMate가 회의를 녹음하려면 마이크 접근 권한이 필요합니다.",
+          "enableBackgroundRecording": true
+        }
+      ],
+      "expo-dev-client",
+      "expo-web-browser",
+      "expo-secure-store"
+    ],
+    "extra": {
+      "orgmate": {
+        "apiBaseUrl": "https://func-orgmate-dev-dzp4jp5cpytuk.azurewebsites.net/api",
+        "tenantId": "067db808-c3ee-4430-8135-05f15d0d242f",
+        "clientId": "a1565718-e1bb-431c-a333-7d1f7f31ed1e",
+        "apiScope": "api://898b2100-b25b-4e2f-b118-6701c0e33e30/access_as_user"
+      }
+    }
+  }
+}

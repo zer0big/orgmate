@@ -23,6 +23,12 @@ param chatModelCapacity int = 50
 @description('Object id of the developer principal that should receive data-plane access for local development. Leave empty to skip.')
 param developerPrincipalId string = ''
 
+@description('Application (client) id of the OrgMate API app registration. When set, Easy Auth is enforced on the function app.')
+param apiClientId string = ''
+
+@description('Application (client) id of the OrgMate mobile app registration. Restricts which clients may call the API.')
+param mobileClientId string = ''
+
 var resourceToken = toLower(uniqueString(subscription().id, environmentName, location))
 var tags = {
   'azd-env-name': environmentName
@@ -134,6 +140,8 @@ module functionApp 'modules/functionApp.bicep' = {
     speechEndpoint: speech.outputs.endpoint
     openAiEndpoint: openAi.outputs.endpoint
     chatDeploymentName: openAi.outputs.chatDeploymentName
+    entraClientId: apiClientId
+    allowedClientApplicationIds: empty(mobileClientId) ? [] : [mobileClientId]
   }
 }
 
@@ -195,4 +203,7 @@ output ORGMATE_COSMOS_DATABASE string = cosmos.outputs.databaseName
 output ORGMATE_SPEECH_ENDPOINT string = speech.outputs.endpoint
 output ORGMATE_OPENAI_ENDPOINT string = openAi.outputs.endpoint
 output ORGMATE_CHAT_DEPLOYMENT string = openAi.outputs.chatDeploymentName
+output ORGMATE_API_CLIENT_ID string = apiClientId
+output ORGMATE_API_SCOPE string = empty(apiClientId) ? '' : 'api://${apiClientId}/access_as_user'
+output ORGMATE_MOBILE_CLIENT_ID string = mobileClientId
 output APPLICATIONINSIGHTS_CONNECTION_STRING string = monitoring.outputs.appInsightsConnectionString
