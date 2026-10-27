@@ -2,6 +2,7 @@
   "expo": {
     "name": "OrgMate",
     "slug": "orgmate",
+    "owner": "zerobig",
     "scheme": "orgmate",
     "version": "0.1.0",
     "orientation": "portrait",
@@ -19,7 +20,15 @@
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK",
+        "android.permission.FOREGROUND_SERVICE_MICROPHONE"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -42,6 +51,9 @@
         "tenantId": "067db808-c3ee-4430-8135-05f15d0d242f",
         "clientId": "a1565718-e1bb-431c-a333-7d1f7f31ed1e",
         "apiScope": "api://898b2100-b25b-4e2f-b118-6701c0e33e30/access_as_user"
+      },
+      "eas": {
+        "projectId": "bda3e195-b6dc-446c-8518-890ae182c3bb"
       }
     }
   }
