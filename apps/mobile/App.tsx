@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
   AppState,
   Image,
+  Modal,
   Pressable,
   SafeAreaView,
   ScrollView,
@@ -34,6 +35,8 @@ import {
 } from './src/api/client';
 import { SummaryView } from './src/components/SummaryView';
 import { toPlainText } from './src/export/summaryText';
+import { ThemeProvider, useTheme } from './src/theme/useTheme';
+import { THEMES, type Theme } from './src/theme/theme';
 
 const LOGO = require('./assets/logo.png');
 
@@ -43,7 +46,7 @@ const POLL_ATTEMPTS = 150;
 
 const STATUS_LABELS: Record<string, string> = {
   recording: '녹음 중',
-  uploaded: '업로드 완료',
+  uploaded: '전사 대기',
   transcribing: '전사 중',
   transcribed: '전사 완료',
   organizing: '정리 중',
@@ -63,48 +66,255 @@ function isStalled(session: Session): boolean {
   return Date.now() - new Date(session.updatedAt).getTime() > STALL_AFTER_MS;
 }
 
-function statusLabel(status: string): string {
-  return STATUS_LABELS[status] ?? status;
-}
-
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function formatDuration(totalSeconds: number): string {
   const pad = (value: number) => String(value).padStart(2, '0');
-  return [
-    pad(Math.floor(totalSeconds / 3600)),
-    pad(Math.floor((totalSeconds % 3600) / 60)),
-    pad(totalSeconds % 60),
-  ].join(':');
+  const hours = Math.floor(totalSeconds / 3600);
+  const body = [pad(Math.floor((totalSeconds % 3600) / 60)), pad(totalSeconds % 60)].join(':');
+  return hours > 0 ? `${pad(hours)}:${body}` : body;
+}
+
+/** Normalises the dBFS meter reading into a 0..1 bar width. */
+function meterRatio(metering?: number): number {
+  if (metering === undefined) {
+    return 0;
+  }
+  return Math.max(0, Math.min(1, (metering + 60) / 60));
+}
+
+function Brand({ styles }: { styles: AppStyles }) {
+  return (
+    <View style={styles.brand}>
+      <Image source={LOGO} style={styles.brandLogo} resizeMode="contain" />
+      <Text style={styles.brandName}>OrgMate</Text>
+    </View>
+  );
+}
+
+function StatusPill({
+  styles,
+  theme,
+  label,
+  tone,
+  spinning,
+}: {
+  styles: AppStyles;
+  theme: Theme;
+  label: string;
+  tone: 'accent' | 'muted' | 'danger';
+  spinning?: boolean;
+}) {
+  const toneStyle =
+    tone === 'accent' ? styles.pillAccent : tone === 'danger' ? styles.pillDanger : styles.pillMuted;
+  const labelStyle =
+    tone === 'accent'
+      ? styles.pillAccentLabel
+      : tone === 'danger'
+        ? styles.pillDangerLabel
+        : styles.pillMutedLabel;
+  return (
+    <View style={[styles.pill, toneStyle]}>
+      {spinning ? <ActivityIndicator size="small" color={theme.accent} /> : null}
+      <Text style={labelStyle}>{label}</Text>
+    </View>
+  );
+}
+
+function ThemeSheet({
+  visible,
+  onClose,
+  styles,
+}: {
+  visible: boolean;
+  onClose: () => void;
+  styles: AppStyles;
+}) {
+  const { theme, setThemeId } = useTheme();
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <Pressable style={styles.sheetBackdrop} onPress={onClose}>
+        <Pressable style={styles.sheet} onPress={() => undefined}>
+          <Text style={styles.sheetTitle}>배경 테마</Text>
+          {THEMES.map((item) => (
+            <Pressable
+              key={item.id}
+              onPress={() => {
+                setThemeId(item.id);
+                onClose();
+              }}
+              style={[styles.themeRow, theme.id === item.id && styles.themeRowActive]}
+            >
+              <View style={[styles.swatch, { backgroundColor: item.bg, borderColor: item.border }]}>
+                <View style={[styles.swatchDot, { backgroundColor: item.accent }]} />
+              </View>
+              <Text style={styles.themeName}>{item.name}</Text>
+              {theme.id === item.id ? <Text style={styles.themeCheck}>선택됨</Text> : null}
+            </Pressable>
+          ))}
+        </Pressable>
+      </Pressable>
+    </Modal>
+  );
 }
 
 function SignInScreen({ onSignIn, error }: { onSignIn: () => void; error?: string }) {
+  const { theme } = useTheme();
+  const styles = useMemo(() => createStyles(theme), [theme]);
   return (
-    <View style={styles.centered}>
-      <Image source={LOGO} style={styles.logoLarge} resizeMode="contain" />
-      <View style={styles.brandStack}>
-        <Text style={styles.title}>OrgMate</Text>
-        <Text style={styles.subtitle}>회의를 녹음하고 템플릿에 맞춰 자동으로 정리한다.</Text>
-      </View>
-      <Pressable style={[styles.button, styles.buttonStart]} onPress={onSignIn}>
-        <Text style={styles.buttonLabel}>조직 계정으로 로그인</Text>
+    <View style={styles.signIn}>
+      <Image source={LOGO} style={styles.signInLogo} resizeMode="contain" />
+      <Text style={styles.signInName}>OrgMate</Text>
+      <Text style={styles.signInTagline}>녹음하고, 한 번에 정리한다.</Text>
+      <Pressable style={[styles.primaryButton, styles.signInButton]} onPress={onSignIn}>
+        <Text style={styles.primaryButtonLabel}>조직 계정으로 로그인</Text>
       </Pressable>
       {error ? <Text style={styles.error}>{error}</Text> : null}
     </View>
   );
 }
 
+function SessionCard({
+  session,
+  styles,
+  theme,
+  templateName,
+  artifact,
+  expanded,
+  organizing,
+  busyElsewhere,
+  summaryOpen,
+  onToggleExpand,
+  onOrganize,
+  onToggleSummary,
+  onRetranscribe,
+  onShare,
+  onArchive,
+  onDelete,
+}: {
+  session: Session;
+  styles: AppStyles;
+  theme: Theme;
+  templateName: string;
+  artifact?: SummaryArtifact;
+  expanded: boolean;
+  organizing: boolean;
+  busyElsewhere: boolean;
+  summaryOpen: boolean;
+  onToggleExpand: () => void;
+  onOrganize: () => void;
+  onToggleSummary: () => void;
+  onRetranscribe: () => void;
+  onShare: () => void;
+  onArchive: () => void;
+  onDelete: () => void;
+}) {
+  const stalled = isStalled(session);
+  const working = BUSY_STATUSES.has(session.status) && !stalled;
+  const canOrganize = session.status === 'transcribed' || session.status === 'organized';
+  const canTranscribe = session.chunks.length > 0 && (stalled || session.status === 'failed');
+  const hasSummary = (session.summaries?.length ?? 0) > 0;
+
+  const meta = [
+    session.durationSeconds ? formatDuration(session.durationSeconds) : undefined,
+    session.speakerCount ? `화자 ${session.speakerCount}명` : undefined,
+    session.summaries?.length
+      ? session.summaries.map((entry) => entry.templateName).join(', ')
+      : undefined,
+  ].filter(Boolean);
+
+  return (
+    <View style={[styles.card, organizing && styles.cardActive]}>
+      <View style={styles.cardHead}>
+        <Text style={styles.cardTitle} numberOfLines={1}>
+          {session.title}
+        </Text>
+        <StatusPill
+          styles={styles}
+          theme={theme}
+          label={stalled ? '중단됨' : (STATUS_LABELS[session.status] ?? session.status)}
+          tone={stalled || session.status === 'failed' ? 'danger' : working ? 'accent' : 'muted'}
+          spinning={working}
+        />
+      </View>
+
+      {meta.length ? <Text style={styles.cardMeta}>{meta.join(' · ')}</Text> : null}
+
+      {session.transcriptPreview ? (
+        <Text style={styles.cardPreview} numberOfLines={2}>
+          {session.transcriptPreview}
+        </Text>
+      ) : null}
+
+      {session.error ? <Text style={styles.error}>{session.error}</Text> : null}
+
+      <View style={styles.cardActions}>
+        {canOrganize ? (
+          <Pressable
+            disabled={busyElsewhere}
+            onPress={onOrganize}
+            style={[styles.chipButton, styles.chipButtonFilled, busyElsewhere && styles.dimmed]}
+          >
+            <Text style={styles.chipButtonFilledLabel}>
+              {organizing ? '정리 중...' : `${templateName}으로 정리`}
+            </Text>
+          </Pressable>
+        ) : null}
+        {canTranscribe ? (
+          <Pressable onPress={onRetranscribe} style={[styles.chipButton, styles.chipButtonFilled]}>
+            <Text style={styles.chipButtonFilledLabel}>전사 시작</Text>
+          </Pressable>
+        ) : null}
+        {hasSummary ? (
+          <Pressable onPress={onToggleSummary} style={styles.chipButton}>
+            <Text style={styles.chipButtonLabel}>{summaryOpen ? '결과 접기' : '결과 보기'}</Text>
+          </Pressable>
+        ) : null}
+        <Pressable onPress={onToggleExpand} style={styles.chipButton}>
+          <Text style={styles.chipButtonLabel}>{expanded ? '닫기' : '더보기'}</Text>
+        </Pressable>
+      </View>
+
+      {expanded ? (
+        <View style={styles.cardActions}>
+          {hasSummary ? (
+            <Pressable onPress={onShare} style={styles.chipButton}>
+              <Text style={styles.chipButtonLabel}>공유</Text>
+            </Pressable>
+          ) : null}
+          <Pressable onPress={onArchive} style={styles.chipButton}>
+            <Text style={styles.chipButtonLabel}>
+              {session.archivedAt ? '보관 해제' : '보관'}
+            </Text>
+          </Pressable>
+          <Pressable onPress={onDelete} style={[styles.chipButton, styles.chipButtonDanger]}>
+            <Text style={styles.chipButtonDangerLabel}>삭제</Text>
+          </Pressable>
+        </View>
+      ) : null}
+
+      {summaryOpen && artifact ? <SummaryView artifact={artifact} /> : null}
+    </View>
+  );
+}
+
 function RecorderScreen({ onSignOut }: { onSignOut: () => void }) {
+  const { theme } = useTheme();
+  const styles = useMemo(() => createStyles(theme), [theme]);
+
   const [session, setSession] = useState<Session | undefined>();
   const [sessions, setSessions] = useState<Session[]>([]);
   const [templates, setTemplates] = useState<Template[]>([]);
   const [templateId, setTemplateId] = useState<string>('meeting-minutes');
   const [summaries, setSummaries] = useState<Record<string, SummaryArtifact>>({});
   const [openSummary, setOpenSummary] = useState<Record<string, boolean>>({});
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [organizingId, setOrganizingId] = useState<string | undefined>();
   const [showArchived, setShowArchived] = useState(false);
+  const [showThemeSheet, setShowThemeSheet] = useState(false);
+  const [showDetails, setShowDetails] = useState(false);
   const [log, setLog] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | undefined>();
@@ -156,9 +366,7 @@ function RecorderScreen({ onSignOut }: { onSignOut: () => void }) {
           continue;
         }
 
-        setSessions((previous) =>
-          previous.map((item) => (item.id === sessionId ? latest : item)),
-        );
+        setSessions((previous) => previous.map((item) => (item.id === sessionId ? latest : item)));
         if (sessionRef.current?.id === sessionId) {
           setSession(latest);
         }
@@ -188,9 +396,7 @@ function RecorderScreen({ onSignOut }: { onSignOut: () => void }) {
 
       try {
         const queued = await requestSummary(target.id, templateId);
-        setSessions((previous) =>
-          previous.map((item) => (item.id === target.id ? queued : item)),
-        );
+        setSessions((previous) => previous.map((item) => (item.id === target.id ? queued : item)));
 
         const done = await waitForStatus(target.id, ['organized'], '정리');
         if (done?.status !== 'organized') {
@@ -209,7 +415,7 @@ function RecorderScreen({ onSignOut }: { onSignOut: () => void }) {
     [append, templateId, templates, waitForStatus],
   );
 
-  const onShowSummary = useCallback(
+  const onToggleSummary = useCallback(
     async (target: Session) => {
       const isOpen = openSummary[target.id];
       setOpenSummary((previous) => ({ ...previous, [target.id]: !isOpen }));
@@ -237,9 +443,7 @@ function RecorderScreen({ onSignOut }: { onSignOut: () => void }) {
       append(`전사 재시작: ${target.title}`);
       try {
         const queued = await retranscribeSession(target.id);
-        setSessions((previous) =>
-          previous.map((item) => (item.id === target.id ? queued : item)),
-        );
+        setSessions((previous) => previous.map((item) => (item.id === target.id ? queued : item)));
         void waitForStatus(target.id, ['transcribed', 'organized'], '전사');
       } catch (cause) {
         setError(String(cause));
@@ -373,211 +577,170 @@ function RecorderScreen({ onSignOut }: { onSignOut: () => void }) {
     }
   }, [append, recorder, refresh, waitForStatus]);
 
+  const activeTemplate = templates.find((item) => item.id === templateId);
+
   return (
-    <ScrollView contentContainerStyle={styles.container}>
-      <View style={styles.headerRow}>
-        <View style={styles.brandRow}>
-          <Image source={LOGO} style={styles.logo} resizeMode="contain" />
-          <View style={styles.brandDivider} />
-          <Text style={styles.title}>OrgMate</Text>
+    <>
+      <ScrollView contentContainerStyle={styles.page}>
+        <View style={styles.header}>
+          <Brand styles={styles} />
+          <View style={styles.headerActions}>
+            <Pressable onPress={() => setShowThemeSheet(true)} style={styles.iconButton}>
+              <Text style={styles.iconButtonLabel}>테마</Text>
+            </Pressable>
+            <Pressable onPress={onSignOut} style={styles.iconButton}>
+              <Text style={styles.iconButtonLabel}>로그아웃</Text>
+            </Pressable>
+          </View>
         </View>
-        <Pressable onPress={onSignOut}>
-          <Text style={styles.link}>로그아웃</Text>
-        </Pressable>
-      </View>
 
-      <View style={styles.card}>
-        <Text style={styles.timer}>{formatDuration(recorder.elapsedSeconds)}</Text>
-        <Text style={styles.meta}>
-          {recorder.isRecording ? '녹음 중' : '정지'} · 청크 {recorder.chunks.length}개 · 분할{' '}
-          {CHUNK_SECONDS / 60}분
-        </Text>
-        <Text style={styles.meta}>
-          입력 레벨 {recorder.metering === undefined ? '-' : recorder.metering.toFixed(1)} dB
-        </Text>
-        <Text style={styles.meta}>
-          네이티브 {recorder.nativeIsRecording ? '녹음중' : '정지'} ·{' '}
-          {formatDuration(recorder.nativeDurationSeconds)} ·{' '}
-          {(recorder.fileSize / 1024).toFixed(0)} KB
-        </Text>
-        {session ? (
-          <Text style={styles.meta}>
-            세션 {session.id.slice(0, 8)} · {statusLabel(session.status)}
+        <View style={styles.recorder}>
+          <Text style={styles.timer}>{formatDuration(recorder.elapsedSeconds)}</Text>
+          <Text style={styles.recorderMeta}>
+            {recorder.isRecording
+              ? `녹음 중 · ${CHUNK_SECONDS / 60}분 단위 자동 분할`
+              : '버튼을 눌러 녹음을 시작한다'}
           </Text>
-        ) : null}
-      </View>
 
-      <Pressable
-        disabled={busy}
-        onPress={recorder.isRecording ? onStop : onStart}
-        style={({ pressed }) => [
-          styles.button,
-          recorder.isRecording ? styles.buttonStop : styles.buttonStart,
-          (pressed || busy) && styles.buttonPressed,
-        ]}
-      >
-        {busy ? (
-          <ActivityIndicator color="#FFFFFF" />
-        ) : (
-          <Text style={styles.buttonLabel}>{recorder.isRecording ? '녹음 중지' : '녹음 시작'}</Text>
-        )}
-      </Pressable>
+          <View style={styles.meterTrack}>
+            <View
+              style={[
+                styles.meterFill,
+                { width: `${Math.round(meterRatio(recorder.metering) * 100)}%` },
+              ]}
+            />
+          </View>
 
-      {recorder.error ? <Text style={styles.error}>{recorder.error}</Text> : null}
-      {error ? <Text style={styles.error}>{error}</Text> : null}
-
-      <Text style={styles.sectionTitle}>정리 템플릿</Text>
-      <View style={styles.chipRow}>
-        {templates.map((item) => (
           <Pressable
-            key={item.id}
-            onPress={() => setTemplateId(item.id)}
-            style={[styles.chip, templateId === item.id && styles.chipActive]}
+            disabled={busy}
+            onPress={recorder.isRecording ? onStop : onStart}
+            style={({ pressed }) => [
+              styles.primaryButton,
+              recorder.isRecording && styles.primaryButtonStop,
+              (pressed || busy) && styles.dimmed,
+            ]}
           >
-            <Text style={[styles.chipLabel, templateId === item.id && styles.chipLabelActive]}>
-              {item.name}
-            </Text>
-          </Pressable>
-        ))}
-      </View>
-      <Text style={styles.meta}>
-        {templates.find((item) => item.id === templateId)?.description ?? ''}
-      </Text>
-      <Text style={styles.hint}>
-        선택한 템플릿은 아래에서 "정리"를 누른 세션 하나에만 적용된다. 세션은 각각 따로 정리된다.
-      </Text>
-
-      <View style={styles.sectionHeader}>
-        <Text style={styles.sectionTitle}>내 세션</Text>
-        <Pressable onPress={() => setShowArchived((previous) => !previous)}>
-          <Text style={styles.link}>{showArchived ? '활성만 보기' : '보관함 포함'}</Text>
-        </Pressable>
-      </View>
-      {sessions.length === 0 ? (
-        <Text style={styles.meta}>아직 없음</Text>
-      ) : (
-        sessions.map((item) => {
-          const stalled = isStalled(item);
-          const working = BUSY_STATUSES.has(item.status) && !stalled;
-          const isOrganizing = organizingId === item.id;
-          const canOrganize = item.status === 'transcribed' || item.status === 'organized';
-          const canTranscribe =
-            item.chunks.length > 0 && (stalled || item.status === 'failed');
-          const artifact = summaries[item.id];
-          const hasSummary = (item.summaries?.length ?? 0) > 0;
-          return (
-            <View key={item.id} style={[styles.row, isOrganizing && styles.rowActive]}>
-              <Text style={styles.rowTitle}>
-                {item.archivedAt ? '[보관] ' : ''}
-                {item.title}
+            {busy ? (
+              <ActivityIndicator color={theme.accentOn} />
+            ) : (
+              <Text style={styles.primaryButtonLabel}>
+                {recorder.isRecording ? '녹음 중지' : '녹음 시작'}
               </Text>
-              <View style={styles.statusRow}>
-                {working ? <ActivityIndicator size="small" color="#1570EF" /> : null}
-                <Text style={styles.meta}>
-                  {stalled ? '중단됨' : statusLabel(item.status)} · 청크 {item.chunks.length}개
-                  {item.durationSeconds ? ` · ${formatDuration(item.durationSeconds)}` : ''}
-                  {item.speakerCount ? ` · 화자 ${item.speakerCount}명` : ''}
-                </Text>
-              </View>
-              {item.summaries?.length ? (
-                <Text style={styles.meta}>
-                  정리본 {item.summaries.map((entry) => entry.templateName).join(', ')}
-                </Text>
-              ) : null}
-              {item.transcriptPreview ? (
-                <Text style={styles.preview} numberOfLines={3}>
-                  {item.transcriptPreview}
-                </Text>
-              ) : null}
-              {item.error ? <Text style={styles.error}>{item.error}</Text> : null}
+            )}
+          </Pressable>
+        </View>
 
-              <View style={styles.actionRow}>
-                {canTranscribe ? (
-                  <Pressable
-                    onPress={() => void onRetranscribe(item)}
-                    style={[styles.smallButton, styles.buttonStart]}
-                  >
-                    <Text style={styles.smallButtonLabel}>전사 시작</Text>
-                  </Pressable>
-                ) : null}
-                {canOrganize ? (
-                  <Pressable
-                    disabled={organizingId !== undefined}
-                    onPress={() => void onOrganize(item)}
-                    style={[
-                      styles.smallButton,
-                      styles.buttonStart,
-                      organizingId !== undefined && styles.buttonPressed,
-                    ]}
-                  >
-                    <Text style={styles.smallButtonLabel}>
-                      {isOrganizing
-                        ? '정리 중...'
-                        : `이 세션 정리 · ${
-                            templates.find((entry) => entry.id === templateId)?.name ?? templateId
-                          }`}
-                    </Text>
-                  </Pressable>
-                ) : null}
-                {hasSummary ? (
-                  <Pressable
-                    onPress={() => void onShowSummary(item)}
-                    style={[styles.smallButton, styles.smallButtonGhost]}
-                  >
-                    <Text style={styles.smallButtonGhostLabel}>
-                      {openSummary[item.id] ? '결과 접기' : '결과 보기'}
-                    </Text>
-                  </Pressable>
-                ) : null}
-                {hasSummary ? (
-                  <Pressable
-                    onPress={() => void onShare(item)}
-                    style={[styles.smallButton, styles.smallButtonGhost]}
-                  >
-                    <Text style={styles.smallButtonGhostLabel}>공유 / 내보내기</Text>
-                  </Pressable>
-                ) : null}
-                <Pressable
-                  onPress={() => void onArchive(item)}
-                  style={[styles.smallButton, styles.smallButtonGhost]}
-                >
-                  <Text style={styles.smallButtonGhostLabel}>
-                    {item.archivedAt ? '보관 해제' : '보관'}
-                  </Text>
-                </Pressable>
-                <Pressable
-                  onPress={() => onDelete(item)}
-                  style={[styles.smallButton, styles.smallButtonDanger]}
-                >
-                  <Text style={styles.smallButtonDangerLabel}>삭제</Text>
-                </Pressable>
-              </View>
+        {recorder.error ? <Text style={styles.error}>{recorder.error}</Text> : null}
+        {error ? <Text style={styles.error}>{error}</Text> : null}
 
-              {openSummary[item.id] && artifact ? <SummaryView artifact={artifact} /> : null}
-            </View>
-          );
-        })
-      )}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>정리 템플릿</Text>
+          <View style={styles.chipRow}>
+            {templates.map((item) => (
+              <Pressable
+                key={item.id}
+                onPress={() => setTemplateId(item.id)}
+                style={[styles.chip, templateId === item.id && styles.chipActive]}
+              >
+                <Text style={[styles.chipLabel, templateId === item.id && styles.chipLabelActive]}>
+                  {item.name}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+          {activeTemplate ? (
+            <Text style={styles.sectionHint}>{activeTemplate.description}</Text>
+          ) : null}
+        </View>
 
-      <Text style={styles.sectionTitle}>로그</Text>
-      {log.map((line, index) => (
-        <Text key={`${index}-${line}`} style={styles.logLine}>
-          {line}
-        </Text>
-      ))}
-    </ScrollView>
+        <View style={styles.section}>
+          <View style={styles.sectionHead}>
+            <Text style={styles.sectionTitle}>내 세션</Text>
+            <Pressable onPress={() => setShowArchived((previous) => !previous)}>
+              <Text style={styles.linkLabel}>{showArchived ? '활성만' : '보관함 포함'}</Text>
+            </Pressable>
+          </View>
+
+          {sessions.length === 0 ? (
+            <Text style={styles.sectionHint}>아직 녹음이 없다.</Text>
+          ) : (
+            sessions.map((item) => (
+              <SessionCard
+                key={item.id}
+                session={item}
+                styles={styles}
+                theme={theme}
+                templateName={activeTemplate?.name ?? '선택한 템플릿'}
+                artifact={summaries[item.id]}
+                expanded={Boolean(expanded[item.id])}
+                organizing={organizingId === item.id}
+                busyElsewhere={organizingId !== undefined}
+                summaryOpen={Boolean(openSummary[item.id])}
+                onToggleExpand={() =>
+                  setExpanded((previous) => ({ ...previous, [item.id]: !previous[item.id] }))
+                }
+                onOrganize={() => void onOrganize(item)}
+                onToggleSummary={() => void onToggleSummary(item)}
+                onRetranscribe={() => void onRetranscribe(item)}
+                onShare={() => void onShare(item)}
+                onArchive={() => void onArchive(item)}
+                onDelete={() => onDelete(item)}
+              />
+            ))
+          )}
+        </View>
+
+        <Pressable onPress={() => setShowDetails((previous) => !previous)} style={styles.footerToggle}>
+          <Text style={styles.footerToggleLabel}>
+            {showDetails ? '상세 정보 숨기기' : '상세 정보'}
+          </Text>
+        </Pressable>
+
+        {showDetails ? (
+          <View style={styles.details}>
+            <Text style={styles.detailLine}>
+              네이티브 {recorder.nativeIsRecording ? '녹음중' : '정지'} ·{' '}
+              {formatDuration(recorder.nativeDurationSeconds)} ·{' '}
+              {(recorder.fileSize / 1024).toFixed(0)} KB · 청크 {recorder.chunks.length}개
+            </Text>
+            <Text style={styles.detailLine}>
+              입력 레벨 {recorder.metering === undefined ? '-' : recorder.metering.toFixed(1)} dB
+            </Text>
+            {session ? (
+              <Text style={styles.detailLine}>
+                현재 세션 {session.id.slice(0, 8)} ·{' '}
+                {STATUS_LABELS[session.status] ?? session.status}
+              </Text>
+            ) : null}
+            {log.map((line, index) => (
+              <Text key={`${index}-${line}`} style={styles.detailLine}>
+                {line}
+              </Text>
+            ))}
+          </View>
+        ) : null}
+      </ScrollView>
+
+      <ThemeSheet
+        visible={showThemeSheet}
+        onClose={() => setShowThemeSheet(false)}
+        styles={styles}
+      />
+    </>
   );
 }
 
-export default function App() {
+function Shell() {
   const auth = useAuth();
+  const { theme } = useTheme();
+  const styles = useMemo(() => createStyles(theme), [theme]);
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <StatusBar barStyle="dark-content" />
+      <StatusBar barStyle={theme.statusBar} backgroundColor={theme.bg} />
       {!auth.isReady ? (
-        <View style={styles.centered}>
-          <ActivityIndicator />
+        <View style={styles.signIn}>
+          <ActivityIndicator color={theme.accent} />
         </View>
       ) : auth.isSignedIn ? (
         <RecorderScreen onSignOut={auth.signOut} />
@@ -588,78 +751,197 @@ export default function App() {
   );
 }
 
-const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: '#F5F7FA' },
-  centered: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, gap: 16 },
-  container: { padding: 24, gap: 14 },
-  headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  brandRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  brandStack: { alignItems: 'center', gap: 8 },
-  brandDivider: { width: 1, height: 22, backgroundColor: '#D0D5DD' },
-  logo: { width: 58, height: 28 },
-  logoLarge: { width: 220, height: 106 },
-  sectionHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-end',
-  },
-  title: { fontSize: 26, fontWeight: '700', color: '#101828' },
-  subtitle: { fontSize: 14, lineHeight: 20, color: '#475467', textAlign: 'center' },
-  link: { fontSize: 14, color: '#1570EF', fontWeight: '600' },
-  card: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    padding: 20,
-    gap: 6,
-    borderWidth: 1,
-    borderColor: '#E4E7EC',
-  },
-  timer: { fontSize: 40, fontWeight: '700', color: '#101828', fontVariant: ['tabular-nums'] },
-  meta: { fontSize: 13, color: '#475467' },
-  button: {
-    borderRadius: 12,
-    paddingVertical: 16,
-    paddingHorizontal: 24,
-    alignItems: 'center',
-    alignSelf: 'stretch',
-  },
-  buttonStart: { backgroundColor: '#1570EF' },
-  buttonStop: { backgroundColor: '#D92D20' },
-  buttonPressed: { opacity: 0.7 },
-  buttonLabel: { color: '#FFFFFF', fontSize: 16, fontWeight: '600' },
-  error: { color: '#B42318', fontSize: 13 },
-  sectionTitle: { fontSize: 16, fontWeight: '600', color: '#101828', marginTop: 10 },
-  row: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 10,
-    padding: 12,
-    gap: 4,
-    borderWidth: 1,
-    borderColor: '#E4E7EC',
-  },
-  rowTitle: { fontWeight: '600', color: '#101828' },
-  rowActive: { borderColor: '#1570EF', borderWidth: 2 },
-  hint: { fontSize: 12, color: '#667085', lineHeight: 17 },
-  preview: { fontSize: 12, color: '#344054', lineHeight: 17 },
-  statusRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  chip: {
-    borderRadius: 999,
-    paddingVertical: 7,
-    paddingHorizontal: 13,
-    borderWidth: 1,
-    borderColor: '#D0D5DD',
-    backgroundColor: '#FFFFFF',
-  },
-  chipActive: { backgroundColor: '#1570EF', borderColor: '#1570EF' },
-  chipLabel: { fontSize: 13, color: '#344054', fontWeight: '500' },
-  chipLabelActive: { color: '#FFFFFF' },
-  actionRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 6 },
-  smallButton: { borderRadius: 8, paddingVertical: 8, paddingHorizontal: 14 },
-  smallButtonLabel: { color: '#FFFFFF', fontSize: 13, fontWeight: '600' },
-  smallButtonGhost: { backgroundColor: '#EFF4FF' },
-  smallButtonGhostLabel: { color: '#1570EF', fontSize: 13, fontWeight: '600' },
-  smallButtonDanger: { backgroundColor: '#FEF3F2' },
-  smallButtonDangerLabel: { color: '#B42318', fontSize: 13, fontWeight: '600' },
-  logLine: { fontSize: 11, color: '#667085' },
-});
+export default function App() {
+  return (
+    <ThemeProvider>
+      <Shell />
+    </ThemeProvider>
+  );
+}
+
+type AppStyles = ReturnType<typeof createStyles>;
+
+function createStyles(theme: Theme) {
+  return StyleSheet.create({
+    safeArea: { flex: 1, backgroundColor: theme.bg },
+    page: { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 40, gap: 24 },
+
+    header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+    brand: { gap: 2 },
+    brandLogo: { width: 40, height: 19, opacity: 0.85 },
+    brandName: { fontSize: 24, fontWeight: '800', color: theme.text, letterSpacing: -0.4 },
+    headerActions: { flexDirection: 'row', gap: 8 },
+    iconButton: {
+      paddingHorizontal: 12,
+      paddingVertical: 7,
+      borderRadius: 999,
+      backgroundColor: theme.surface,
+      borderWidth: 1,
+      borderColor: theme.border,
+    },
+    iconButtonLabel: { fontSize: 12, fontWeight: '600', color: theme.textMuted },
+
+    recorder: {
+      backgroundColor: theme.surface,
+      borderRadius: 20,
+      borderWidth: 1,
+      borderColor: theme.border,
+      paddingVertical: 26,
+      paddingHorizontal: 20,
+      alignItems: 'center',
+      gap: 14,
+    },
+    timer: {
+      fontSize: 52,
+      fontWeight: '300',
+      color: theme.text,
+      fontVariant: ['tabular-nums'],
+      letterSpacing: 1,
+    },
+    recorderMeta: { fontSize: 13, color: theme.textMuted },
+    meterTrack: {
+      height: 4,
+      width: '70%',
+      borderRadius: 2,
+      backgroundColor: theme.border,
+      overflow: 'hidden',
+    },
+    meterFill: { height: 4, borderRadius: 2, backgroundColor: theme.accent },
+
+    primaryButton: {
+      borderRadius: 14,
+      paddingVertical: 16,
+      paddingHorizontal: 28,
+      alignItems: 'center',
+      alignSelf: 'stretch',
+      backgroundColor: theme.accent,
+    },
+    primaryButtonStop: { backgroundColor: theme.danger },
+    primaryButtonLabel: { color: theme.accentOn, fontSize: 16, fontWeight: '700' },
+    dimmed: { opacity: 0.6 },
+
+    section: { gap: 10 },
+    sectionHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+    sectionTitle: { fontSize: 13, fontWeight: '700', color: theme.textMuted, letterSpacing: 0.4 },
+    sectionHint: { fontSize: 12, lineHeight: 18, color: theme.textMuted },
+    linkLabel: { fontSize: 12, fontWeight: '600', color: theme.accent },
+
+    chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+    chip: {
+      borderRadius: 999,
+      paddingVertical: 8,
+      paddingHorizontal: 14,
+      borderWidth: 1,
+      borderColor: theme.border,
+      backgroundColor: theme.surface,
+    },
+    chipActive: { backgroundColor: theme.accent, borderColor: theme.accent },
+    chipLabel: { fontSize: 13, color: theme.textMuted, fontWeight: '600' },
+    chipLabelActive: { color: theme.accentOn },
+
+    card: {
+      backgroundColor: theme.surface,
+      borderRadius: 16,
+      borderWidth: 1,
+      borderColor: theme.border,
+      padding: 16,
+      gap: 10,
+    },
+    cardActive: { borderColor: theme.accent },
+    cardHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
+    cardTitle: { flex: 1, fontSize: 15, fontWeight: '700', color: theme.text },
+    cardMeta: { fontSize: 12, color: theme.textMuted },
+    cardPreview: { fontSize: 13, lineHeight: 19, color: theme.textMuted },
+    cardActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+
+    pill: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      borderRadius: 999,
+      paddingVertical: 4,
+      paddingHorizontal: 10,
+    },
+    pillAccent: { backgroundColor: theme.accentSoft },
+    pillAccentLabel: { fontSize: 11, fontWeight: '700', color: theme.accent },
+    pillMuted: { backgroundColor: theme.surfaceAlt, borderWidth: 1, borderColor: theme.border },
+    pillMutedLabel: { fontSize: 11, fontWeight: '700', color: theme.textMuted },
+    pillDanger: { backgroundColor: theme.dangerSoft },
+    pillDangerLabel: { fontSize: 11, fontWeight: '700', color: theme.danger },
+
+    chipButton: {
+      borderRadius: 10,
+      paddingVertical: 9,
+      paddingHorizontal: 14,
+      backgroundColor: theme.surfaceAlt,
+      borderWidth: 1,
+      borderColor: theme.border,
+    },
+    chipButtonLabel: { fontSize: 13, fontWeight: '600', color: theme.textMuted },
+    chipButtonFilled: { backgroundColor: theme.accent, borderColor: theme.accent },
+    chipButtonFilledLabel: { fontSize: 13, fontWeight: '700', color: theme.accentOn },
+    chipButtonDanger: { backgroundColor: theme.dangerSoft, borderColor: theme.dangerSoft },
+    chipButtonDangerLabel: { fontSize: 13, fontWeight: '600', color: theme.danger },
+
+    error: { color: theme.danger, fontSize: 13, lineHeight: 19 },
+
+    footerToggle: { alignSelf: 'center', paddingVertical: 8 },
+    footerToggleLabel: { fontSize: 12, color: theme.textMuted },
+    details: {
+      backgroundColor: theme.surfaceAlt,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: theme.border,
+      padding: 12,
+      gap: 4,
+    },
+    detailLine: { fontSize: 11, lineHeight: 16, color: theme.textMuted },
+
+    signIn: {
+      flex: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
+      padding: 28,
+      gap: 10,
+    },
+    signInLogo: { width: 190, height: 92, marginBottom: 6 },
+    signInName: { fontSize: 30, fontWeight: '800', color: theme.text, letterSpacing: -0.6 },
+    signInTagline: { fontSize: 14, color: theme.textMuted, marginBottom: 20 },
+    signInButton: { marginTop: 4 },
+
+    sheetBackdrop: {
+      flex: 1,
+      backgroundColor: 'rgba(8, 12, 20, 0.45)',
+      justifyContent: 'flex-end',
+    },
+    sheet: {
+      backgroundColor: theme.surface,
+      borderTopLeftRadius: 22,
+      borderTopRightRadius: 22,
+      padding: 22,
+      paddingBottom: 34,
+      gap: 6,
+    },
+    sheetTitle: { fontSize: 16, fontWeight: '700', color: theme.text, marginBottom: 8 },
+    themeRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+      paddingVertical: 12,
+      paddingHorizontal: 12,
+      borderRadius: 12,
+    },
+    themeRowActive: { backgroundColor: theme.accentSoft },
+    swatch: {
+      width: 34,
+      height: 34,
+      borderRadius: 10,
+      borderWidth: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    swatchDot: { width: 12, height: 12, borderRadius: 6 },
+    themeName: { flex: 1, fontSize: 15, fontWeight: '600', color: theme.text },
+    themeCheck: { fontSize: 12, fontWeight: '700', color: theme.accent },
+  });
+}
