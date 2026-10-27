@@ -5,6 +5,7 @@ import {
   AppState,
   Image,
   Modal,
+  Platform,
   Pressable,
   SafeAreaView,
   ScrollView,
@@ -39,6 +40,9 @@ import { ThemeProvider, useTheme } from './src/theme/useTheme';
 import { THEMES, type Theme } from './src/theme/theme';
 
 const LOGO = require('./assets/logo.png');
+
+/** SafeAreaView does not reserve the Android status bar, so the header needs the inset. */
+const STATUS_BAR_INSET = Platform.OS === 'android' ? (StatusBar.currentHeight ?? 24) : 0;
 
 /** How long to wait for a background worker before giving up. */
 const POLL_INTERVAL_MS = 4000;
@@ -123,37 +127,66 @@ function StatusPill({
   );
 }
 
-function ThemeSheet({
+function SettingsSheet({
   visible,
   onClose,
   styles,
+  showDetails,
+  onToggleDetails,
+  onSignOut,
 }: {
   visible: boolean;
   onClose: () => void;
   styles: AppStyles;
+  showDetails: boolean;
+  onToggleDetails: () => void;
+  onSignOut: () => void;
 }) {
   const { theme, setThemeId } = useTheme();
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <Pressable style={styles.sheetBackdrop} onPress={onClose}>
         <Pressable style={styles.sheet} onPress={() => undefined}>
+          <View style={styles.sheetHandle} />
           <Text style={styles.sheetTitle}>배경 테마</Text>
-          {THEMES.map((item) => (
-            <Pressable
-              key={item.id}
-              onPress={() => {
-                setThemeId(item.id);
-                onClose();
-              }}
-              style={[styles.themeRow, theme.id === item.id && styles.themeRowActive]}
-            >
-              <View style={[styles.swatch, { backgroundColor: item.bg, borderColor: item.border }]}>
-                <View style={[styles.swatchDot, { backgroundColor: item.accent }]} />
-              </View>
-              <Text style={styles.themeName}>{item.name}</Text>
-              {theme.id === item.id ? <Text style={styles.themeCheck}>선택됨</Text> : null}
-            </Pressable>
-          ))}
+          <View style={styles.swatchRow}>
+            {THEMES.map((item) => (
+              <Pressable
+                key={item.id}
+                onPress={() => setThemeId(item.id)}
+                style={styles.swatchCell}
+              >
+                <View
+                  style={[
+                    styles.swatch,
+                    { backgroundColor: item.bg, borderColor: item.border },
+                    theme.id === item.id && styles.swatchActive,
+                  ]}
+                >
+                  <View style={[styles.swatchDot, { backgroundColor: item.accent }]} />
+                </View>
+                <Text style={[styles.swatchName, theme.id === item.id && styles.swatchNameActive]}>
+                  {item.name}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+
+          <View style={styles.sheetDivider} />
+
+          <Pressable onPress={onToggleDetails} style={styles.sheetRow}>
+            <Text style={styles.sheetRowLabel}>상세 정보 표시</Text>
+            <Text style={styles.sheetRowValue}>{showDetails ? '켜짐' : '꺼짐'}</Text>
+          </Pressable>
+          <Pressable
+            onPress={() => {
+              onClose();
+              onSignOut();
+            }}
+            style={styles.sheetRow}
+          >
+            <Text style={styles.sheetRowDanger}>로그아웃</Text>
+          </Pressable>
         </Pressable>
       </Pressable>
     </Modal>
@@ -313,7 +346,7 @@ function RecorderScreen({ onSignOut }: { onSignOut: () => void }) {
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [organizingId, setOrganizingId] = useState<string | undefined>();
   const [showArchived, setShowArchived] = useState(false);
-  const [showThemeSheet, setShowThemeSheet] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const [showDetails, setShowDetails] = useState(false);
   const [log, setLog] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
@@ -584,32 +617,30 @@ function RecorderScreen({ onSignOut }: { onSignOut: () => void }) {
       <ScrollView contentContainerStyle={styles.page}>
         <View style={styles.header}>
           <Brand styles={styles} />
-          <View style={styles.headerActions}>
-            <Pressable onPress={() => setShowThemeSheet(true)} style={styles.iconButton}>
-              <Text style={styles.iconButtonLabel}>테마</Text>
-            </Pressable>
-            <Pressable onPress={onSignOut} style={styles.iconButton}>
-              <Text style={styles.iconButtonLabel}>로그아웃</Text>
-            </Pressable>
-          </View>
+          <Pressable onPress={() => setShowSettings(true)} style={styles.settingsButton}>
+            <View style={styles.settingsDot} />
+            <View style={styles.settingsDot} />
+            <View style={styles.settingsDot} />
+          </Pressable>
         </View>
 
         <View style={styles.recorder}>
           <Text style={styles.timer}>{formatDuration(recorder.elapsedSeconds)}</Text>
-          <Text style={styles.recorderMeta}>
-            {recorder.isRecording
-              ? `녹음 중 · ${CHUNK_SECONDS / 60}분 단위 자동 분할`
-              : '버튼을 눌러 녹음을 시작한다'}
-          </Text>
-
-          <View style={styles.meterTrack}>
-            <View
-              style={[
-                styles.meterFill,
-                { width: `${Math.round(meterRatio(recorder.metering) * 100)}%` },
-              ]}
-            />
-          </View>
+          {recorder.isRecording ? (
+            <>
+              <Text style={styles.recorderMeta}>
+                녹음 중 · {CHUNK_SECONDS / 60}분 단위 자동 분할
+              </Text>
+              <View style={styles.meterTrack}>
+                <View
+                  style={[
+                    styles.meterFill,
+                    { width: `${Math.round(meterRatio(recorder.metering) * 100)}%` },
+                  ]}
+                />
+              </View>
+            </>
+          ) : null}
 
           <Pressable
             disabled={busy}
@@ -690,12 +721,6 @@ function RecorderScreen({ onSignOut }: { onSignOut: () => void }) {
           )}
         </View>
 
-        <Pressable onPress={() => setShowDetails((previous) => !previous)} style={styles.footerToggle}>
-          <Text style={styles.footerToggleLabel}>
-            {showDetails ? '상세 정보 숨기기' : '상세 정보'}
-          </Text>
-        </Pressable>
-
         {showDetails ? (
           <View style={styles.details}>
             <Text style={styles.detailLine}>
@@ -721,10 +746,13 @@ function RecorderScreen({ onSignOut }: { onSignOut: () => void }) {
         ) : null}
       </ScrollView>
 
-      <ThemeSheet
-        visible={showThemeSheet}
-        onClose={() => setShowThemeSheet(false)}
+      <SettingsSheet
+        visible={showSettings}
+        onClose={() => setShowSettings(false)}
         styles={styles}
+        showDetails={showDetails}
+        onToggleDetails={() => setShowDetails((previous) => !previous)}
+        onSignOut={onSignOut}
       />
     </>
   );
@@ -763,23 +791,25 @@ type AppStyles = ReturnType<typeof createStyles>;
 
 function createStyles(theme: Theme) {
   return StyleSheet.create({
-    safeArea: { flex: 1, backgroundColor: theme.bg },
-    page: { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 40, gap: 24 },
+    safeArea: { flex: 1, backgroundColor: theme.bg, paddingTop: STATUS_BAR_INSET },
+    page: { paddingHorizontal: 20, paddingTop: 12, paddingBottom: 40, gap: 24 },
 
-    header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-    brand: { gap: 2 },
-    brandLogo: { width: 40, height: 19, opacity: 0.85 },
-    brandName: { fontSize: 24, fontWeight: '800', color: theme.text, letterSpacing: -0.4 },
-    headerActions: { flexDirection: 'row', gap: 8 },
-    iconButton: {
-      paddingHorizontal: 12,
-      paddingVertical: 7,
-      borderRadius: 999,
+    header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end' },
+    brand: { gap: 4 },
+    brandLogo: { width: 46, height: 22, opacity: 0.9 },
+    brandName: { fontSize: 22, fontWeight: '800', color: theme.text, letterSpacing: -0.4 },
+    settingsButton: {
+      width: 38,
+      height: 38,
+      borderRadius: 19,
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 3,
       backgroundColor: theme.surface,
       borderWidth: 1,
       borderColor: theme.border,
     },
-    iconButtonLabel: { fontSize: 12, fontWeight: '600', color: theme.textMuted },
+    settingsDot: { width: 3.5, height: 3.5, borderRadius: 2, backgroundColor: theme.textMuted },
 
     recorder: {
       backgroundColor: theme.surface,
@@ -885,8 +915,6 @@ function createStyles(theme: Theme) {
 
     error: { color: theme.danger, fontSize: 13, lineHeight: 19 },
 
-    footerToggle: { alignSelf: 'center', paddingVertical: 8 },
-    footerToggleLabel: { fontSize: 12, color: theme.textMuted },
     details: {
       backgroundColor: theme.surfaceAlt,
       borderRadius: 12,
@@ -920,28 +948,40 @@ function createStyles(theme: Theme) {
       borderTopRightRadius: 22,
       padding: 22,
       paddingBottom: 34,
-      gap: 6,
+      gap: 14,
     },
-    sheetTitle: { fontSize: 16, fontWeight: '700', color: theme.text, marginBottom: 8 },
-    themeRow: {
+    sheetHandle: {
+      width: 38,
+      height: 4,
+      borderRadius: 2,
+      backgroundColor: theme.border,
+      alignSelf: 'center',
+      marginBottom: 4,
+    },
+    sheetTitle: { fontSize: 13, fontWeight: '700', color: theme.textMuted, letterSpacing: 0.4 },
+    sheetDivider: { height: 1, backgroundColor: theme.border },
+    sheetRow: {
       flexDirection: 'row',
+      justifyContent: 'space-between',
       alignItems: 'center',
-      gap: 12,
-      paddingVertical: 12,
-      paddingHorizontal: 12,
-      borderRadius: 12,
+      paddingVertical: 10,
     },
-    themeRowActive: { backgroundColor: theme.accentSoft },
+    sheetRowLabel: { fontSize: 15, fontWeight: '600', color: theme.text },
+    sheetRowValue: { fontSize: 13, fontWeight: '600', color: theme.accent },
+    sheetRowDanger: { fontSize: 15, fontWeight: '600', color: theme.danger },
+    swatchRow: { flexDirection: 'row', gap: 14 },
+    swatchCell: { alignItems: 'center', gap: 6 },
     swatch: {
-      width: 34,
-      height: 34,
-      borderRadius: 10,
+      width: 56,
+      height: 56,
+      borderRadius: 16,
       borderWidth: 1,
       alignItems: 'center',
       justifyContent: 'center',
     },
-    swatchDot: { width: 12, height: 12, borderRadius: 6 },
-    themeName: { flex: 1, fontSize: 15, fontWeight: '600', color: theme.text },
-    themeCheck: { fontSize: 12, fontWeight: '700', color: theme.accent },
+    swatchActive: { borderWidth: 2.5, borderColor: theme.accent },
+    swatchDot: { width: 14, height: 14, borderRadius: 7 },
+    swatchName: { fontSize: 12, fontWeight: '600', color: theme.textMuted },
+    swatchNameActive: { color: theme.accent },
   });
 }
