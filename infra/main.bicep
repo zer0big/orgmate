@@ -66,6 +66,9 @@ module dataStorage 'modules/storage.bicep' = {
       'transcripts'
       'artifacts'
     ]
+    queues: [
+      'transcribe-jobs'
+    ]
     enableLifecycleTiering: true
     enableBlobSoftDelete: true
   }
@@ -135,6 +138,7 @@ module functionApp 'modules/functionApp.bicep' = {
     appInsightsConnectionString: monitoring.outputs.appInsightsConnectionString
     dataStorageAccountName: dataStorage.outputs.name
     dataStorageBlobEndpoint: dataStorage.outputs.primaryBlobEndpoint
+    dataStorageQueueEndpoint: dataStorage.outputs.primaryQueueEndpoint
     cosmosEndpoint: cosmos.outputs.endpoint
     cosmosDatabaseName: cosmos.outputs.databaseName
     speechEndpoint: speech.outputs.endpoint

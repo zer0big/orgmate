@@ -18,6 +18,9 @@ param skuName string = 'Standard_ZRS'
 @description('Blob containers to create.')
 param containers array = []
 
+@description('Storage queues to create. Used for background job hand-off.')
+param queues array = []
+
 @description('Apply hot/cool/cold tiering to long lived audio and artifacts.')
 param enableLifecycleTiering bool = false
 
@@ -100,6 +103,18 @@ resource blobContainers 'Microsoft.Storage/storageAccounts/blobServices/containe
   }
 ]
 
+resource queueServices 'Microsoft.Storage/storageAccounts/queueServices@2023-05-01' = if (!empty(queues)) {
+  parent: storage
+  name: 'default'
+}
+
+resource storageQueues 'Microsoft.Storage/storageAccounts/queueServices/queues@2023-05-01' = [
+  for queue in queues: {
+    parent: queueServices
+    name: queue
+  }
+]
+
 // Archive tier is not available on ZRS accounts, so the policy tiers Hot -> Cool -> Cold.
 resource lifecycle 'Microsoft.Storage/storageAccounts/managementPolicies@2023-05-01' = if (enableLifecycleTiering) {
   parent: storage
@@ -173,3 +188,4 @@ resource lifecycle 'Microsoft.Storage/storageAccounts/managementPolicies@2023-05
 output name string = storage.name
 output id string = storage.id
 output primaryBlobEndpoint string = storage.properties.primaryEndpoints.blob
+output primaryQueueEndpoint string = storage.properties.primaryEndpoints.queue

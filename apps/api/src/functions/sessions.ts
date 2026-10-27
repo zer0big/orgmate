@@ -1,10 +1,12 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/functions';
 import { randomUUID } from 'node:crypto';
 import { getUser } from '../auth.js';
-import { createUploadSas } from '../services/storage.js';
+import { createUploadSas, downloadJson } from '../services/storage.js';
 import { SessionDocument, sessionsContainer } from '../services/cosmos.js';
+import { enqueueTranscribeJob } from '../services/queue.js';
 
 const AUDIO_CONTAINER = 'audio';
+const TRANSCRIPT_CONTAINER = 'transcripts';
 
 function unauthorized(): HttpResponseInit {
   return { status: 401, jsonBody: { error: 'Unauthorized' } };
@@ -162,7 +164,36 @@ async function completeSession(
   await sessionsContainer.item(sessionId, user.userId).replace(session);
   context.log(`Session ${sessionId} uploaded with ${chunkCount} chunk(s)`);
 
+  await enqueueTranscribeJob({ userId: user.userId, sessionId });
+  context.log(`Queued transcription for session ${sessionId}`);
+
   return { status: 200, jsonBody: session };
+}
+
+async function getTranscript(request: HttpRequest): Promise<HttpResponseInit> {
+  const user = getUser(request);
+  if (!user) {
+    return unauthorized();
+  }
+
+  const sessionId = request.params.sessionId;
+  if (!sessionId) {
+    return badRequest('sessionId is required');
+  }
+
+  const session = await readSession(user.userId, sessionId);
+  if (!session) {
+    return { status: 404, jsonBody: { error: 'Session not found' } };
+  }
+  if (!session.transcriptBlobPath) {
+    return {
+      status: 409,
+      jsonBody: { error: 'Transcript is not ready yet', status: session.status },
+    };
+  }
+
+  const transcript = await downloadJson(TRANSCRIPT_CONTAINER, session.transcriptBlobPath);
+  return { status: 200, jsonBody: transcript };
 }
 
 app.http('createSession', {
@@ -198,4 +229,11 @@ app.http('completeSession', {
   authLevel: 'anonymous',
   route: 'sessions/{sessionId}/complete',
   handler: completeSession,
+});
+
+app.http('getTranscript', {
+  methods: ['GET'],
+  authLevel: 'anonymous',
+  route: 'sessions/{sessionId}/transcript',
+  handler: getTranscript,
 });

@@ -37,5 +37,15 @@ export interface SessionDocument {
   chunks: SessionChunk[];
   durationSeconds?: number;
   transcriptBlobPath?: string;
+  /** First few hundred characters of the transcript, for list previews. */
+  transcriptPreview?: string;
+  speakerCount?: number;
+  transcribedAt?: string;
   error?: string;
+}
+
+/** Message body carried on the transcription queue. */
+export interface TranscribeJob {
+  userId: string;
+  sessionId: string;
 }

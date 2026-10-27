@@ -16,6 +16,27 @@ export interface Session {
   updatedAt: string;
   chunks: SessionChunk[];
   durationSeconds?: number;
+  transcriptPreview?: string;
+  speakerCount?: number;
+  transcribedAt?: string;
+  error?: string;
+}
+
+export interface TranscriptSegment {
+  chunkIndex: number;
+  speaker?: number;
+  offsetMilliseconds: number;
+  durationMilliseconds: number;
+  text: string;
+}
+
+export interface Transcript {
+  sessionId: string;
+  locale: string;
+  durationMilliseconds: number;
+  speakerCount: number;
+  text: string;
+  segments: TranscriptSegment[];
 }
 
 export interface UploadTarget {
@@ -57,6 +78,10 @@ export function listSessions(): Promise<{ sessions: Session[] }> {
 
 export function getSession(sessionId: string): Promise<Session> {
   return call<Session>(`/sessions/${sessionId}`);
+}
+
+export function getTranscript(sessionId: string): Promise<Transcript> {
+  return call<Transcript>(`/sessions/${sessionId}/transcript`);
 }
 
 export function completeSession(

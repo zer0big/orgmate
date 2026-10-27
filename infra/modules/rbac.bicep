@@ -72,6 +72,20 @@ resource dataBlobDelegator 'Microsoft.Authorization/roleAssignments@2022-04-01' 
   }
 }
 
+// Enqueue and dequeue background transcription jobs.
+resource dataQueueContributor 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  scope: dataStorage
+  name: guid(dataStorage.id, principalId, roles.storageQueueDataContributor)
+  properties: {
+    roleDefinitionId: subscriptionResourceId(
+      'Microsoft.Authorization/roleDefinitions',
+      roles.storageQueueDataContributor
+    )
+    principalId: principalId
+    principalType: principalType
+  }
+}
+
 resource runtimeBlobOwner 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (includeRuntimeRoles) {
   scope: functionStorage
   name: guid(functionStorage.id, principalId, roles.storageBlobDataOwner)

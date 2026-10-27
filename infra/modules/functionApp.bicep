@@ -28,6 +28,15 @@ param dataStorageAccountName string
 @description('Blob endpoint of the data storage account.')
 param dataStorageBlobEndpoint string
 
+@description('Queue endpoint of the data storage account. Hosts the background job queues.')
+param dataStorageQueueEndpoint string
+
+@description('Queue that carries transcription jobs.')
+param transcribeQueueName string = 'transcribe-jobs'
+
+@description('Locale hint passed to Speech fast transcription.')
+param transcriptionLocale string = 'ko-KR'
+
 @description('Cosmos DB document endpoint.')
 param cosmosEndpoint string
 
@@ -141,6 +150,27 @@ resource site 'Microsoft.Web/sites@2024-04-01' = {
         {
           name: 'ORGMATE_DATA_BLOB_ENDPOINT'
           value: dataStorageBlobEndpoint
+        }
+        {
+          name: 'ORGMATE_DATA_QUEUE_ENDPOINT'
+          value: dataStorageQueueEndpoint
+        }
+        {
+          name: 'ORGMATE_TRANSCRIBE_QUEUE'
+          value: transcribeQueueName
+        }
+        {
+          name: 'ORGMATE_TRANSCRIPTION_LOCALE'
+          value: transcriptionLocale
+        }
+        // Identity-based connection used by the queue trigger binding.
+        {
+          name: 'ORGMATE_JOBS__queueServiceUri'
+          value: dataStorageQueueEndpoint
+        }
+        {
+          name: 'ORGMATE_JOBS__credential'
+          value: 'managedidentity'
         }
         {
           name: 'ORGMATE_COSMOS_ENDPOINT'

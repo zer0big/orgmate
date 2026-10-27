@@ -16,10 +16,29 @@ import { CHUNK_SECONDS } from './src/audio/recordingOptions';
 import {
   completeSession,
   createSession,
+  getSession,
   listSessions,
   uploadChunk,
   type Session,
 } from './src/api/client';
+
+/** How long to wait for the background transcription worker before giving up. */
+const TRANSCRIBE_POLL_INTERVAL_MS = 5000;
+const TRANSCRIBE_POLL_ATTEMPTS = 120;
+
+const STATUS_LABELS: Record<string, string> = {
+  recording: '녹음 중',
+  uploaded: '업로드 완료',
+  transcribing: '전사 중',
+  transcribed: '전사 완료',
+  organizing: '정리 중',
+  organized: '정리 완료',
+  failed: '실패',
+};
+
+function statusLabel(status: string): string {
+  return STATUS_LABELS[status] ?? status;
+}
 
 function formatDuration(totalSeconds: number): string {
   const pad = (value: number) => String(value).padStart(2, '0');
@@ -89,6 +108,39 @@ function RecorderScreen({
     }
   }, []);
 
+  /** Polls until the queue worker finishes transcribing the recording. */
+  const watchTranscription = useCallback(
+    async (sessionId: string) => {
+      for (let attempt = 0; attempt < TRANSCRIBE_POLL_ATTEMPTS; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, TRANSCRIBE_POLL_INTERVAL_MS));
+        let latest: Session;
+        try {
+          latest = await getSession(sessionId);
+        } catch (cause) {
+          append(`상태 조회 실패: ${String(cause)}`);
+          continue;
+        }
+
+        if (sessionRef.current?.id === sessionId) {
+          setSession(latest);
+        }
+
+        if (latest.status === 'transcribed') {
+          append(`전사 완료 (화자 ${latest.speakerCount ?? 0}명)`);
+          await refresh();
+          return;
+        }
+        if (latest.status === 'failed') {
+          append(`전사 실패: ${latest.error ?? '알 수 없는 오류'}`);
+          await refresh();
+          return;
+        }
+      }
+      append('전사가 예상보다 오래 걸린다. 목록을 새로고침해 확인한다.');
+    },
+    [append, refresh],
+  );
+
   useEffect(() => {
     void refresh();
   }, [refresh]);
@@ -130,7 +182,8 @@ function RecorderScreen({
       if (current) {
         const updated = await completeSession(current.id, recorded.length, elapsed);
         setSession(updated);
-        append(`세션 완료 (청크 ${recorded.length}개)`);
+        append(`세션 완료 (청크 ${recorded.length}개) · 전사 대기`);
+        void watchTranscription(current.id);
       }
       await refresh();
     } catch (cause) {
@@ -138,7 +191,7 @@ function RecorderScreen({
     } finally {
       setBusy(false);
     }
-  }, [append, recorder, refresh]);
+  }, [append, recorder, refresh, watchTranscription]);
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
@@ -164,7 +217,11 @@ function RecorderScreen({
           {formatDuration(recorder.nativeDurationSeconds)} ·{' '}
           {(recorder.fileSize / 1024).toFixed(0)} KB
         </Text>
-        {session ? <Text style={styles.meta}>세션 {session.id.slice(0, 8)}</Text> : null}
+        {session ? (
+          <Text style={styles.meta}>
+            세션 {session.id.slice(0, 8)} · {statusLabel(session.status)}
+          </Text>
+        ) : null}
       </View>
 
       <Pressable
@@ -194,9 +251,16 @@ function RecorderScreen({
           <View key={item.id} style={styles.row}>
             <Text style={styles.rowTitle}>{item.title}</Text>
             <Text style={styles.meta}>
-              {item.status} · 청크 {item.chunks.length}개
+              {statusLabel(item.status)} · 청크 {item.chunks.length}개
               {item.durationSeconds ? ` · ${formatDuration(item.durationSeconds)}` : ''}
+              {item.speakerCount ? ` · 화자 ${item.speakerCount}명` : ''}
             </Text>
+            {item.transcriptPreview ? (
+              <Text style={styles.preview} numberOfLines={3}>
+                {item.transcriptPreview}
+              </Text>
+            ) : null}
+            {item.error ? <Text style={styles.error}>{item.error}</Text> : null}
           </View>
         ))
       )}
@@ -270,5 +334,6 @@ const styles = StyleSheet.create({
     borderColor: '#E4E7EC',
   },
   rowTitle: { fontWeight: '600', color: '#101828' },
+  preview: { fontSize: 12, color: '#344054', lineHeight: 17 },
   logLine: { fontSize: 11, color: '#667085' },
 });

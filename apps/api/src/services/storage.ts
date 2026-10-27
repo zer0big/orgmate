@@ -67,3 +67,25 @@ export async function listBlobs(container: string, prefix: string): Promise<stri
   }
   return names;
 }
+
+export async function downloadBlob(container: string, blobPath: string): Promise<Buffer> {
+  const client = blobService.getContainerClient(container).getBlockBlobClient(blobPath);
+  return client.downloadToBuffer();
+}
+
+export async function uploadJson(
+  container: string,
+  blobPath: string,
+  payload: unknown,
+): Promise<void> {
+  const body = Buffer.from(JSON.stringify(payload), 'utf8');
+  const client = blobService.getContainerClient(container).getBlockBlobClient(blobPath);
+  await client.upload(body, body.byteLength, {
+    blobHTTPHeaders: { blobContentType: 'application/json; charset=utf-8' },
+  });
+}
+
+export async function downloadJson<T>(container: string, blobPath: string): Promise<T> {
+  const buffer = await downloadBlob(container, blobPath);
+  return JSON.parse(buffer.toString('utf8')) as T;
+}
