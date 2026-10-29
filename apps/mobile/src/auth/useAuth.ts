@@ -168,6 +168,7 @@ export function useAuth(): AuthState {
         },
         discovery,
       );
+
       await persist(toStored(response));
       setIsSignedIn(true);
       setDisplayName(readName(response.idToken));

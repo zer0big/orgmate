@@ -29,7 +29,38 @@ param apiClientId string = ''
 @description('Application (client) id of the OrgMate mobile app registration. Restricts which clients may call the API.')
 param mobileClientId string = ''
 
+@description('Monthly cost budget cap in USD for the subscription-scoped OrgMate environment.')
+param monthlyBudgetLimit int = 100
+
+@description('Optional contact emails for monthly cost threshold notifications. Leave empty to skip notifications.')
+param budgetContactEmails array = []
+
+@description('Email address for operational alerts and budget notifications. Leave empty to skip.')
+param alertEmail string = ''
+
+@description('Optional Key Vault name override. If empty, a deterministic default name is generated.')
+param keyVaultName string = ''
+
+@description('Budget start date for the monthly cost guardrail. Defaults to the first day of the current month.')
+param budgetStartDate string = '${utcNow('yyyy')}-${utcNow('MM')}-01T00:00:00Z'
+
 var resourceToken = toLower(uniqueString(subscription().id, environmentName, location))
+var budgetEndDate = dateTimeAdd(budgetStartDate, 'P1Y')
+var effectiveBudgetEmails = !empty(budgetContactEmails) ? budgetContactEmails : (empty(alertEmail) ? [] : [alertEmail])
+var budgetNotifications = !empty(effectiveBudgetEmails) ? {
+  '80Percent': {
+    enabled: true
+    operator: 'GreaterThanOrEqualTo'
+    threshold: 80
+    contactEmails: effectiveBudgetEmails
+  }
+  '100Percent': {
+    enabled: true
+    operator: 'GreaterThanOrEqualTo'
+    threshold: 100
+    contactEmails: effectiveBudgetEmails
+  }
+} : null
 var tags = {
   'azd-env-name': environmentName
   application: 'orgmate'
@@ -50,6 +81,8 @@ module monitoring 'modules/monitoring.bicep' = {
     tags: tags
     logAnalyticsName: 'log-orgmate-${environmentName}-${resourceToken}'
     appInsightsName: 'appi-orgmate-${environmentName}-${resourceToken}'
+    alertEmail: alertEmail
+    dataStorageAccountName: dataStorage.outputs.name
   }
 }
 
@@ -150,6 +183,32 @@ module functionApp 'modules/functionApp.bicep' = {
   }
 }
 
+module keyVault 'modules/keyVault.bicep' = {
+  scope: rg
+  name: 'keyVault'
+  params: {
+    location: location
+    tags: tags
+    name: empty(keyVaultName) ? 'kv${take(replace(toLower(environmentName), '-', ''), 3)}${take(toLower(resourceToken), 17)}' : keyVaultName
+    enablePurgeProtection: true
+    enableRbacAuthorization: true
+  }
+}
+
+resource monthlyBudget 'Microsoft.Consumption/budgets@2024-08-01' = {
+  name: 'orgmate-${environmentName}-monthly-budget'
+  properties: {
+    category: 'Cost'
+    timeGrain: 'Monthly'
+    amount: monthlyBudgetLimit
+    timePeriod: {
+      startDate: budgetStartDate
+      endDate: budgetEndDate
+    }
+    notifications: budgetNotifications
+  }
+}
+
 module appRbac 'modules/rbac.bicep' = {
   scope: rg
   name: 'appRbac'
@@ -211,4 +270,6 @@ output ORGMATE_CHAT_DEPLOYMENT string = openAi.outputs.chatDeploymentName
 output ORGMATE_API_CLIENT_ID string = apiClientId
 output ORGMATE_API_SCOPE string = empty(apiClientId) ? '' : 'api://${apiClientId}/access_as_user'
 output ORGMATE_MOBILE_CLIENT_ID string = mobileClientId
+output ORGMATE_KEY_VAULT_NAME string = keyVault.outputs.name
+output ORGMATE_MONTHLY_COST_LIMIT_USD string = string(monthlyBudgetLimit)
 output APPLICATIONINSIGHTS_CONNECTION_STRING string = monitoring.outputs.appInsightsConnectionString

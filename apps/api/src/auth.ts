@@ -5,6 +5,10 @@ export interface AuthenticatedUser {
   userId: string;
   /** Display name or UPN, best effort. */
   displayName: string;
+  /** Declared app roles or Azure AD role names provided by Easy Auth. */
+  roles: string[];
+  /** True when the principal carries an explicit admin role. */
+  isAdmin: boolean;
 }
 
 interface ClientPrincipalClaim {
@@ -29,6 +33,12 @@ const NAME_CLAIMS = [
   'http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name',
 ];
 
+const ROLE_CLAIMS = [
+  'roles',
+  'role',
+  'http://schemas.microsoft.com/ws/2008/06/identity/claims/role',
+];
+
 function findClaim(claims: ClientPrincipalClaim[], names: string[]): string | undefined {
   for (const name of names) {
     const claim = claims.find((c) => c.typ === name);
@@ -37,6 +47,16 @@ function findClaim(claims: ClientPrincipalClaim[], names: string[]): string | un
     }
   }
   return undefined;
+}
+
+function findClaims(claims: ClientPrincipalClaim[], names: string[]): string[] {
+  const matches: string[] = [];
+  for (const claim of claims) {
+    if (names.includes(claim.typ) && claim.val) {
+      matches.push(claim.val);
+    }
+  }
+  return matches;
 }
 
 /**
@@ -63,8 +83,19 @@ export function getUser(request: HttpRequest): AuthenticatedUser | undefined {
     return undefined;
   }
 
+  const roles = findClaims(claims, ROLE_CLAIMS)
+    .map((role) => role.trim())
+    .filter(Boolean);
+
+  const normalizedRoles = roles.map((role) => role.toLowerCase());
+  const isAdmin = normalizedRoles.some(
+    (role) => role.includes('admin') || role.includes('administrator') || role.includes('orgmate-admin'),
+  );
+
   return {
     userId,
     displayName: findClaim(claims, NAME_CLAIMS) ?? userId,
+    roles,
+    isAdmin,
   };
 }

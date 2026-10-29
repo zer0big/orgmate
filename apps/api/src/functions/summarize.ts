@@ -8,6 +8,7 @@ import {
 import { downloadJson, uploadJson, uploadText } from '../services/storage.js';
 import { summarizeTranscript } from '../services/openai.js';
 import { readGlossary, toPhraseList } from '../services/glossary.js';
+import { readCustomTemplates } from '../services/templateCatalog.js';
 import { findTemplate, renderMarkdown } from '../templates/systemTemplates.js';
 
 const TRANSCRIPT_CONTAINER = 'transcripts';
@@ -80,7 +81,8 @@ async function summarizeSession(message: unknown, context: InvocationContext): P
     return;
   }
 
-  const template = findTemplate(job.templateId);
+  const customTemplates = await readCustomTemplates(job.userId);
+  const template = findTemplate(job.templateId, customTemplates);
   if (!template) {
     context.error(`Unknown template ${job.templateId}`);
     return;

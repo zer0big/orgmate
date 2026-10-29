@@ -27,6 +27,12 @@ param enableLifecycleTiering bool = false
 @description('Enable blob soft delete and versioning for recoverability.')
 param enableBlobSoftDelete bool = false
 
+@description('Days after upload before recording audio is permanently deleted.')
+param audioRetentionDays int = 30
+
+@description('Days after last modification before transcripts and artifacts are permanently deleted.')
+param resultRetentionDays int = 365
+
 resource storage 'Microsoft.Storage/storageAccounts@2023-05-01' = {
   name: name
   location: location
@@ -115,7 +121,8 @@ resource storageQueues 'Microsoft.Storage/storageAccounts/queueServices/queues@2
   }
 ]
 
-// Archive tier is not available on ZRS accounts, so the policy tiers Hot -> Cool -> Cold.
+// Archive tier is not available on ZRS accounts, so results tier Hot -> Cool.
+// Audio is short lived: it is only needed until transcription completes, then deleted.
 resource lifecycle 'Microsoft.Storage/storageAccounts/managementPolicies@2023-05-01' = if (enableLifecycleTiering) {
   parent: storage
   name: 'default'
@@ -123,7 +130,7 @@ resource lifecycle 'Microsoft.Storage/storageAccounts/managementPolicies@2023-05
     policy: {
       rules: [
         {
-          name: 'tier-recordings'
+          name: 'expire-recordings'
           enabled: true
           type: 'Lifecycle'
           definition: {
@@ -137,11 +144,8 @@ resource lifecycle 'Microsoft.Storage/storageAccounts/managementPolicies@2023-05
             }
             actions: {
               baseBlob: {
-                tierToCool: {
-                  daysAfterModificationGreaterThan: 30
-                }
-                tierToCold: {
-                  daysAfterModificationGreaterThan: 180
+                delete: {
+                  daysAfterModificationGreaterThan: audioRetentionDays
                 }
               }
               version: {
@@ -170,6 +174,9 @@ resource lifecycle 'Microsoft.Storage/storageAccounts/managementPolicies@2023-05
               baseBlob: {
                 tierToCool: {
                   daysAfterModificationGreaterThan: 90
+                }
+                delete: {
+                  daysAfterModificationGreaterThan: resultRetentionDays
                 }
               }
               version: {

@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, type ReactNode } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import type { SummaryArtifact, TemplateColumn, TemplateField } from '../api/client';
 import { useTheme } from '../theme/useTheme';
@@ -39,67 +39,71 @@ export function SummaryView({ artifact }: { artifact: SummaryArtifact }) {
   const { theme } = useTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
 
-  const sections = artifact.fields
-    .map((field) => {
-      const value = artifact.data[field.key];
+  const sections: Array<{ field: TemplateField; node: ReactNode }> = [];
 
-      if (field.type === 'list') {
-        const items = asList(value);
-        if (!items.length) {
-          return undefined;
-        }
-        return {
-          field,
-          node: (
-            <View style={styles.list}>
-              {items.map((item, index) => (
-                <View key={`${index}-${item}`} style={styles.bulletRow}>
-                  <View style={styles.dot} />
-                  <Text style={styles.body}>{item}</Text>
-                </View>
-              ))}
-            </View>
-          ),
-        };
+  for (const field of artifact.fields) {
+    const value = artifact.data[field.key];
+
+    if (field.type === 'list') {
+      const items = asList(value);
+      if (!items.length) {
+        continue;
       }
+      sections.push({
+        field,
+        node: (
+          <View style={styles.list}>
+            {items.map((item, index) => (
+              <View key={`${index}-${item}`} style={styles.bulletRow}>
+                <View style={styles.dot} />
+                <Text style={styles.body}>{item}</Text>
+              </View>
+            ))}
+          </View>
+        ),
+      });
+      continue;
+    }
 
-      if (field.type === 'table') {
-        const rows = asRows(value);
-        if (!rows.length) {
-          return undefined;
-        }
-        const columns = columnsFor(field, rows);
-        return {
-          field,
-          node: (
-            <View style={styles.list}>
-              {rows.map((row, index) => (
-                <View key={index} style={styles.tableCard}>
-                  {columns.map((column, columnIndex) => {
-                    const cell = asText(row[column.key]);
-                    if (!cell) {
-                      return null;
-                    }
-                    return (
-                      <Text
-                        key={column.key}
-                        style={columnIndex === 0 ? styles.cellLead : styles.cellValue}
-                      >
-                        {columnIndex === 0 ? cell : `${column.label} · ${cell}`}
-                      </Text>
-                    );
-                  })}
-                </View>
-              ))}
-            </View>
-          ),
-        };
+    if (field.type === 'table') {
+      const rows = asRows(value);
+      if (!rows.length) {
+        continue;
       }
+      const columns = columnsFor(field, rows);
+      sections.push({
+        field,
+        node: (
+          <View style={styles.list}>
+            {rows.map((row, index) => (
+              <View key={index} style={styles.tableCard}>
+                {columns.map((column, columnIndex) => {
+                  const cell = asText(row[column.key]);
+                  if (!cell) {
+                    return null;
+                  }
+                  return (
+                    <Text
+                      key={column.key}
+                      style={columnIndex === 0 ? styles.cellLead : styles.cellValue}
+                    >
+                      {columnIndex === 0 ? cell : `${column.label} · ${cell}`}
+                    </Text>
+                  );
+                })}
+              </View>
+            ))}
+          </View>
+        ),
+      });
+      continue;
+    }
 
-      const text = asText(value);
-      return text ? { field, node: <Text style={styles.body}>{text}</Text> } : undefined;
-    })
-    .filter((section): section is { field: TemplateField; node: JSX.Element } => Boolean(section));
+    const text = asText(value);
+    if (text) {
+      sections.push({ field, node: <Text style={styles.body}>{text}</Text> });
+    }
+  }
 
   return (
     <View style={styles.container}>

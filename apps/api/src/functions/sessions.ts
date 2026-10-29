@@ -4,6 +4,7 @@ import { getUser } from '../auth.js';
 import { createUploadSas, deleteBlobsByPrefix, downloadJson } from '../services/storage.js';
 import { SessionDocument, sessionsContainer } from '../services/cosmos.js';
 import { enqueueSummarizeJob, enqueueTranscribeJob } from '../services/queue.js';
+import { readCustomTemplates } from '../services/templateCatalog.js';
 import { findTemplate } from '../templates/systemTemplates.js';
 
 const AUDIO_CONTAINER = 'audio';
@@ -224,7 +225,8 @@ async function requestSummary(
   }
 
   const body = (await request.json().catch(() => ({}))) as { templateId?: string };
-  if (!body.templateId || !findTemplate(body.templateId)) {
+  const customTemplates = await readCustomTemplates(user.userId);
+  if (!body.templateId || !findTemplate(body.templateId, customTemplates)) {
     return badRequest('templateId must be one of the available templates');
   }
 

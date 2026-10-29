@@ -28,6 +28,9 @@
     },
     "mobileClientId": {
       "value": "${ORGMATE_MOBILE_CLIENT_ID=}"
+    },
+    "alertEmail": {
+      "value": "${ORGMATE_ALERT_EMAIL=}"
     }
   }
 }

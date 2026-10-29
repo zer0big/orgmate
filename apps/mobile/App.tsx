@@ -15,8 +15,9 @@ import {
   Text,
   View,
 } from 'react-native';
-import { useAuth } from './src/auth/useAuth';
+import { getAccessToken, useAuth } from './src/auth/useAuth';
 import { useChunkedRecorder, type RecordedChunk } from './src/audio/useChunkedRecorder';
+import { config } from './src/config';
 import { CHUNK_SECONDS } from './src/audio/recordingOptions';
 import {
   archiveSession,
@@ -149,6 +150,7 @@ function SettingsSheet({
   showDetails,
   onToggleDetails,
   onOpenGlossary,
+  onRunAdminCheck,
   onSignOut,
 }: {
   visible: boolean;
@@ -157,6 +159,7 @@ function SettingsSheet({
   showDetails: boolean;
   onToggleDetails: () => void;
   onOpenGlossary: () => void;
+  onRunAdminCheck: () => void;
   onSignOut: () => void;
 }) {
   const { theme, setThemeId } = useTheme();
@@ -200,6 +203,16 @@ function SettingsSheet({
           >
             <Text style={styles.sheetRowLabel}>용어 사전</Text>
             <Text style={styles.sheetRowValue}>관리</Text>
+          </Pressable>
+          <Pressable
+            onPress={() => {
+              onClose();
+              onRunAdminCheck();
+            }}
+            style={styles.sheetRow}
+          >
+            <Text style={styles.sheetRowLabel}>관리자 API 확인</Text>
+            <Text style={styles.sheetRowValue}>실행</Text>
           </Pressable>
           <Pressable onPress={onToggleDetails} style={styles.sheetRow}>
             <Text style={styles.sheetRowLabel}>상세 정보 표시</Text>
@@ -556,6 +569,54 @@ function RecorderScreen({ onSignOut }: { onSignOut: () => void }) {
     [append],
   );
 
+  const runAdminApiCheck = useCallback(async () => {
+    setError(undefined);
+    append('관리자 API 확인 시작');
+
+    try {
+      const token = await getAccessToken();
+      if (!token) {
+        throw new Error('로그인 토큰이 없습니다.');
+      }
+
+      const candidates = [`${config.apiBaseUrl.replace(/\/+$/, '')}/manage`];
+
+      let lastResponse: Response | undefined;
+      let lastBody = '';
+
+      for (const url of candidates) {
+        append(`관리자 API 호출: ${url}`);
+        const response = await fetch(url, {
+          method: 'GET',
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
+
+        lastResponse = response;
+        lastBody = await response.text();
+        append(`관리자 API 응답: ${response.status} ${url} ${lastBody.slice(0, 180)}`);
+
+        if (response.ok) {
+          Alert.alert('관리자 API 확인', `성공: ${response.status}\n${lastBody.slice(0, 200)}`);
+          return;
+        }
+
+        if (response.status !== 404) {
+          throw new Error(`관리자 API 실패 (${response.status}): ${lastBody}`);
+        }
+      }
+
+      throw new Error(
+        `관리자 API 실패 (${lastResponse?.status ?? 404}): 마지막 URL에 404가 발생했습니다. ${candidates.join(' / ')}`,
+      );
+    } catch (cause) {
+      const message = String(cause);
+      append(`관리자 API 확인 실패: ${message}`);
+      setError(message);
+    }
+  }, [append]);
+
   const onShare = useCallback(
     async (target: Session) => {
       try {
@@ -801,6 +862,7 @@ function RecorderScreen({ onSignOut }: { onSignOut: () => void }) {
         showDetails={showDetails}
         onToggleDetails={() => setShowDetails((previous) => !previous)}
         onOpenGlossary={() => setShowGlossary(true)}
+        onRunAdminCheck={() => void runAdminApiCheck()}
         onSignOut={onSignOut}
       />
 
@@ -816,7 +878,7 @@ function Shell() {
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <StatusBar barStyle={theme.statusBar} backgroundColor={theme.bg} />
+      <StatusBar barStyle={theme.statusBar} />
       {!auth.isReady ? (
         <View style={styles.signIn}>
           <ActivityIndicator color={theme.accent} />

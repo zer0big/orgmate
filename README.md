@@ -42,13 +42,37 @@ azd up
 
 배포가 끝나면 `https://<function-app>.azurewebsites.net/api/health` 로 상태를 확인한다.
 
+## 관리자 권한 구성을 위한 필수 절차
+
+관리자 페이지는 단순히 로그인 여부가 아니라 Entra ID의 app role claim을 기반으로 접근을 허용한다.
+
+1. Azure Portal → Microsoft Entra ID → App registrations → OrgMate API 앱 선택
+2. `App roles` 탭에서 `+ Create app role` 선택
+3. 예시 값:
+   - Display name: `OrgMate Admin`
+   - Value: `OrgMate.Admin`
+   - Allowed member types: `Users/Groups`
+4. 관리자 사용자 또는 그룹에 해당 역할을 할당
+5. Function App의 Easy Auth에서 해당 API 앱을 인증 서버로 설정했는지 확인
+
+이렇게 설정되면 Easy Auth가 `x-ms-client-principal`에 `roles` claim을 주입하고, 서버는 `Admin`, `Administrator`, `OrgMate.Admin` 형태를 인식해 `/api/manage` 접근을 허용한다. (Functions 호스트가 `admin` 경로를 예약하므로 `manage`를 사용한다.)
+
 ## Well-Architected 설계 원칙 적용
 
 - **보안**: 모든 서비스가 Entra ID 전용 인증이다. Storage는 `allowSharedKeyAccess=false`, Cosmos는 `disableLocalAuth=true`, AI Services와 Azure OpenAI는 `disableLocalAuth=true`로 설정해 API 키를 사용하지 않는다. Function App은 시스템 할당 관리 ID로 모든 데이터 평면에 접근한다. 클라이언트 업로드는 단기 User Delegation SAS만 사용한다.
-- **안정성**: Blob은 ZRS, 버전 관리와 14일 소프트 삭제를 적용한다. Cosmos는 7일 연속 백업을 사용한다. 전사·정리 파이프라인은 Durable Functions 재시도로 보호한다.
+- **안정성**: Blob은 ZRS, 버전 관리와 14일 소프트 삭제를 적용한다. Cosmos는 7일 연속 백업을 사용한다. 전사·정리 파이프라인은 Storage Queue 트리거로 동작하며, 실패 시 최대 3회(`maxDequeueCount`) 재시도하고 이후 poison 큐로 이동한다.
 - **비용 최적화**: 전 구간 서버리스 소비 모델이다. Blob 수명 주기로 녹음은 30일 후 Cool, 180일 후 Cold로 전환한다. Log Analytics는 일일 1GB 수집 상한과 샘플링을 적용한다.
 - **운영 우수성**: 전체 인프라는 Bicep으로 선언하고 `azd`로 재현 가능하게 배포한다.
 - **성능 효율성**: 클라이언트가 Blob에 직접 업로드해 API 경유 전송을 제거한다. 전사와 정리는 비동기 오케스트레이션으로 처리한다.
+
+## 추가 문서
+
+- [운영 매뉴얼](docs/README.md)
+- [아키텍처 설계](docs/architecture/solution-architecture.md)
+- [배포 및 이식 가이드](docs/deployment/deployment-guide.md)
+- [운영 절차서](docs/operations/operations-runbook.md)
+- [사용자 매뉴얼](docs/user-guide.md)
+- [MVP 운영 강화 체크리스트](docs/operations/production-hardening-checklist.md)
 
 ## 알려진 사항
 

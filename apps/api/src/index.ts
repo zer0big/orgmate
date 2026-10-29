@@ -7,6 +7,7 @@ app.setup({
 
 // Function registrations. Every handler module registers itself on import.
 import './functions/health.js';
+import './functions/admin.js';
 import './functions/sessions.js';
 import './functions/templates.js';
 import './functions/glossary.js';

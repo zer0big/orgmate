@@ -293,8 +293,25 @@ export const SYSTEM_TEMPLATES: SummaryTemplate[] = [
   },
 ];
 
-export function findTemplate(templateId: string): SummaryTemplate | undefined {
-  return SYSTEM_TEMPLATES.find((template) => template.id === templateId);
+export function getAllTemplates(customTemplates: SummaryTemplate[] = []): SummaryTemplate[] {
+  const merged = new Map<string, SummaryTemplate>();
+
+  for (const template of SYSTEM_TEMPLATES) {
+    merged.set(template.id, template);
+  }
+
+  for (const template of customTemplates) {
+    merged.set(template.id, template);
+  }
+
+  return [...merged.values()];
+}
+
+export function findTemplate(
+  templateId: string,
+  customTemplates: SummaryTemplate[] = [],
+): SummaryTemplate | undefined {
+  return getAllTemplates(customTemplates).find((template) => template.id === templateId);
 }
 
 /**

@@ -10,6 +10,9 @@ param tags object
 @description('Database name.')
 param databaseName string = 'orgmate'
 
+@description('Days after last modification before a session record is permanently deleted.')
+param sessionRetentionDays int = 365
+
 resource account 'Microsoft.DocumentDB/databaseAccounts@2024-11-15' = {
   name: accountName
   location: location
@@ -65,6 +68,7 @@ resource sessions 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers
   properties: {
     resource: {
       id: 'sessions'
+      defaultTtl: sessionRetentionDays * 86400
       partitionKey: {
         paths: [
           '/userId'
